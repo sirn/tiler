@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/primary.swiftdeps"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/Sources/TilerApp/AppDelegate.swift": {
+    "dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/AppDelegate.d",
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/AppDelegate.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/AppDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/AppDelegate.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/AppDelegate.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/Sources/TilerApp/main.swift": {
+    "dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/main.d",
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/main.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/main.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/TilerApp.build/main.dia"
+  }
+}
