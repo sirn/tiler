@@ -1,0 +1,122 @@
+import AppKit
+import ApplicationServices
+import TilerCore
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+  private var eventBroker: EventBroker?
+  private var windowManager: WindowManager?
+  private var hotkeyDispatcher: HotkeyDispatcher?
+  private var configLoader: ConfigLoader?
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    // Ensure accessibility permissions are granted
+    guard AXIsProcessTrusted() else {
+      let options: NSDictionary = [
+        kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true
+      ]
+      _ = AXIsProcessTrustedWithOptions(options)
+      tiler_log(
+        "Accessibility permission required. Please grant it in System Settings > Privacy & Security > Accessibility, then relaunch."
+      )
+      NSApplication.shared.terminate(nil)
+      return
+    }
+    tiler_log("Accessibility permissions granted. Starting...")
+
+    // Load config
+    let loader = ConfigLoader()
+    self.configLoader = loader
+    let config = loader.load()
+
+    // Set up event broker
+    let broker = EventBroker()
+    self.eventBroker = broker
+
+    // Set up window manager with config
+    let wm = WindowManager(eventBroker: broker, config: config)
+    self.windowManager = wm
+
+    // Initialize screens and workspaces
+    wm.initializeScreens()
+
+    // Reconcile existing windows (enumerate + diff against empty state)
+    wm.reconcile()
+
+    // Start the coalescing drain loop
+    wm.start()
+
+    // Start event listening
+    broker.start()
+
+    // Set up hotkey dispatcher
+    let dispatcher = HotkeyDispatcher()
+    let bindings =
+      config.keybinds.isEmpty
+      ? defaultKeybindings
+      : keybindingsFromConfig(config.keybinds)
+    dispatcher.setBindings(bindings)
+    dispatcher.setActionHandler { [weak self] action in
+      self?.windowManager?.handleAction(action)
+    }
+    dispatcher.start()
+    self.hotkeyDispatcher = dispatcher
+  }
+
+  // MARK: - Keybind helpers
+
+  /// Convert config keybinds into HotkeyDispatcher bindings.
+  private func keybindingsFromConfig(_ keybinds: [KeybindConfig]) -> [KeyCombo: Action] {
+    var bindings: [KeyCombo: Action] = [:]
+    for kb in keybinds {
+      guard let combo = KeyCombo.parse(kb.keys),
+        let action = Action.parse(kb.action, args: kb.args)
+      else {
+        tiler_log("Skipping invalid keybind: keys=\(kb.keys) action=\(kb.action)")
+        continue
+      }
+      bindings[combo] = action
+    }
+    return bindings
+  }
+
+  /// Hardcoded default keybindings (used when no config keybinds are provided).
+  private var defaultKeybindings: [KeyCombo: Action] {
+    var bindings: [KeyCombo: Action] = [:]
+
+    // Navigation
+    bindings[.parse("ctrl+alt+h")!] = .focusColumnLeft
+    bindings[.parse("ctrl+alt+l")!] = .focusColumnRight
+    bindings[.parse("ctrl+alt+j")!] = .focusWindowDown
+    bindings[.parse("ctrl+alt+k")!] = .focusWindowUp
+
+    // Move
+    bindings[.parse("ctrl+alt+shift+h")!] = .moveColumnLeft
+    bindings[.parse("ctrl+alt+shift+l")!] = .moveColumnRight
+    bindings[.parse("ctrl+alt+shift+j")!] = .moveWindowDown
+    bindings[.parse("ctrl+alt+shift+k")!] = .moveWindowUp
+
+    // Workspace focus (1..9)
+    for i in 1...9 {
+      if let combo = KeyCombo.parse("ctrl+alt+\(i)") {
+        bindings[combo] = .focusWorkspace(i)
+      }
+    }
+
+    // Move to workspace (1..9)
+    for i in 1...9 {
+      if let combo = KeyCombo.parse("ctrl+alt+shift+\(i)") {
+        bindings[combo] = .moveToWorkspace(i)
+      }
+    }
+
+    // Column width
+    bindings[.parse("ctrl+alt+comma")!] = .decreaseColumnWidth
+    bindings[.parse("ctrl+alt+period")!] = .increaseColumnWidth
+
+    // Misc
+    bindings[.parse("ctrl+alt+t")!] = .toggleColumnTabbed
+    bindings[.parse("ctrl+alt+q")!] = .closeWindow
+
+    return bindings
+  }
+}
