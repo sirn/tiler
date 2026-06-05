@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/runner.d",
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/debug/tilerPackageTests.build/runner.dia"
+  }
+}
