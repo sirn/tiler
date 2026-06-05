@@ -1,0 +1,13 @@
+{
+  "": {
+    "dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/tilerPackageTests.d",
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/tilerPackageTests.o",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/primary.swiftdeps"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.derived/runner.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/tilerPackageTests.build/runner.dia"
+  }
+}

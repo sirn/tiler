@@ -1,0 +1,175 @@
+{
+  "": {
+    "dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLKit.d",
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLKit.o",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/primary.swiftdeps"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Decoder/InternalTOMLDecoder.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLDecoder.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLDecoder~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLDecoder.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLDecoder.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Decoder/KeyedDecodingContainerProtocol.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedDecodingContainerProtocol.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedDecodingContainerProtocol~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedDecodingContainerProtocol.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedDecodingContainerProtocol.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Decoder/SingleValueDecodingContainer.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueDecodingContainer.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueDecodingContainer~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueDecodingContainer.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueDecodingContainer.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Decoder/TOMLDecoder.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDecoder.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDecoder~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDecoder.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDecoder.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Decoder/UnkeyedDecodingContainer.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedDecodingContainer.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedDecodingContainer~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedDecodingContainer.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedDecodingContainer.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Encoder/InternalTOMLEncoder.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLEncoder.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLEncoder~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLEncoder.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/InternalTOMLEncoder.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Encoder/KeyedEncodingContainer.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedEncodingContainer.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedEncodingContainer~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedEncodingContainer.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/KeyedEncodingContainer.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Encoder/SingleValueEncodingContainer.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueEncodingContainer.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueEncodingContainer~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueEncodingContainer.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/SingleValueEncodingContainer.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Encoder/TOMLEncoder.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLEncoder.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLEncoder~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLEncoder.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLEncoder.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Encoder/UnkeyedEncodingContainer.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedEncodingContainer.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedEncodingContainer~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedEncodingContainer.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/UnkeyedEncodingContainer.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/FormatOptions.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/FormatOptions.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/FormatOptions~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/FormatOptions.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/FormatOptions.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/Operators&Extensions.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/Operators&Extensions.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/Operators&Extensions~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/Operators&Extensions.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/Operators&Extensions.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLArray/TOMLArray+CollectionConformance.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray+CollectionConformance.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray+CollectionConformance~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray+CollectionConformance.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray+CollectionConformance.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLArray/TOMLArray.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArray.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLArray/TOMLArrayIterator.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArrayIterator.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArrayIterator~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArrayIterator.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLArrayIterator.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLDate&Time&DateTime.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDate&Time&DateTime.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDate&Time&DateTime~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDate&Time&DateTime.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLDate&Time&DateTime.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLInt.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLInt.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLInt~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLInt.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLInt.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLTable/TOMLTable+CollectionFunctions.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable+CollectionFunctions.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable+CollectionFunctions~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable+CollectionFunctions.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable+CollectionFunctions.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLTable/TOMLTable.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTable.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLTable/TOMLTableIterator.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTableIterator.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTableIterator~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTableIterator.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLTableIterator.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLValueConvertible+Int.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible+Int.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible+Int~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible+Int.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible+Int.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOML Data Types/TOMLValueConvertible.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValueConvertible.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOMLCodingKey.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLCodingKey.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLCodingKey~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLCodingKey.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLCodingKey.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOMLParseError.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLParseError.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLParseError~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLParseError.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLParseError.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOMLType.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLType.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLType~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLType.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLType.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOMLValue/TOMLValue+Initializers.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue+Initializers.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue+Initializers~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue+Initializers.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue+Initializers.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/TOMLValue/TOMLValue.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/TOMLValue.dia"
+  },
+  "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/checkouts/TOMLKit/Sources/TOMLKit/ValueOptions.swift": {
+    "object": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/ValueOptions.swift.o",
+    "swiftmodule": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/ValueOptions~partial.swiftmodule",
+    "swift-dependencies": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/ValueOptions.swiftdeps",
+    "diagnostics": "/Users/sirn/Dev/src/git.sr.ht/~sirn/tiler/.build/arm64-apple-macosx/release/TOMLKit.build/ValueOptions.dia"
+  }
+}
