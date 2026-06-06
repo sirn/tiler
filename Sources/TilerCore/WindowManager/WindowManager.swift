@@ -2,6 +2,19 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
+/// Snapshot for the menu bar workspace indicator.
+public struct WorkspaceIndicator: Equatable {
+  /// Workspace ids with at least one window (always including `current`), ascending.
+  public let occupied: [WorkspaceID]
+  /// The active workspace id.
+  public let current: WorkspaceID
+
+  public init(occupied: [WorkspaceID], current: WorkspaceID) {
+    self.occupied = occupied
+    self.current = current
+  }
+}
+
 /// Owns the tiling state and orchestrates the event→layout→apply pipeline.
 public class WindowManager {
   public var state: TilerState
@@ -11,6 +24,10 @@ public class WindowManager {
 
 
   public let windowStore = WindowStore()
+
+  /// Fired whenever the menu bar indicator state (occupied workspaces or current) changes.
+  public var onWorkspaceIndicatorChanged: ((WorkspaceIndicator) -> Void)?
+  private var lastIndicator: WorkspaceIndicator?
 
   private let eventBroker: EventBroker
 
@@ -101,6 +118,29 @@ public class WindowManager {
       reconcile()
     }
     reconcilePendingFrames()
+    emitWorkspaceIndicatorIfChanged()
+  }
+
+  /// Current indicator state for the active screen: workspaces with at least one window
+  /// (always including the active workspace), sorted ascending, plus the active workspace.
+  public func workspaceIndicator() -> WorkspaceIndicator? {
+    guard let screenID = activeScreenID(), let screenState = state.screens[screenID] else {
+      return nil
+    }
+    let current = screenState.activeWorkspaceID
+    var occupied = screenState.workspaces
+      .filter { _, ws in ws.columns.contains { !$0.windows.isEmpty } }
+      .map { $0.key }
+    if !occupied.contains(current) { occupied.append(current) }
+    occupied.sort()
+    return WorkspaceIndicator(occupied: occupied, current: current)
+  }
+
+  private func emitWorkspaceIndicatorIfChanged() {
+    guard let indicator = workspaceIndicator() else { return }
+    if indicator == lastIndicator { return }
+    lastIndicator = indicator
+    onWorkspaceIndicatorChanged?(indicator)
   }
 
   // MARK: - Screen & workspace setup
@@ -1194,37 +1234,7 @@ public class WindowManager {
     return false
   }
 
-  // MARK: - Workspace-specific tiling
 
-  private func screenIDForWorkspace(_ wsID: WorkspaceID) -> ScreenID? {
-    return state.screens.first(where: { $0.value.activeWorkspaceID == wsID })?.key
-  }
-
-  private func retileWorkspace(_ wsID: WorkspaceID) {
-    guard let screenID = screenIDForWorkspace(wsID),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else {
-      return
-    }
-    let context = LayoutContext(screen: screenState.info, gaps: gaps)
-    let output = LayoutResolver.resolve(workspace, context)
-    workspace.scrollOffset = output.offset
-    screenState.workspaces[wsID] = workspace
-    state.screens[screenID] = screenState
-    applyEpoch &+= 1
-    for column in workspace.columns {
-      for node in column.windows {
-        if let frame = output.frames[node.id] {
-          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
-        }
-      }
-    }
-    AXWindowBridge.applyFrames(output.frames, store: windowStore)
-    if !output.frames.isEmpty {
-      tiler_debug("Laid out \(output.frames.count) windows on workspace \(wsID)")
-    }
-  }
 
   private func hideInactiveWorkspaces() {
     guard activeScreenID() != nil, activeWorkspaceID() != nil
