@@ -434,8 +434,7 @@ public class WindowManager {
       // The new window's CGWindowList bounds are top-left origin; managed tiles' applied
       // frames are Cocoa bottom-left. Convert before matching so all four edges (including
       // Y) are comparable — Y is essential to tell vertically-stacked same-pid windows apart.
-      let screenHeight =
-        NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+      let screenHeight = AXWindowBridge.primaryScreenHeight()
 
       for newID in adjustedToAdd.sorted() {
         guard let info = windowInfo[newID] else { continue }
@@ -626,7 +625,6 @@ public class WindowManager {
       for (wsID, var workspace) in screenState.workspaces {
         for (colIdx, var column) in workspace.columns.enumerated() {
           if let removeIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
-            let removedKey = column.windows[removeIdx].groupKey
             column.windows.remove(at: removeIdx)
 
             if column.windows.isEmpty {
@@ -645,7 +643,6 @@ public class WindowManager {
 
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
-            appliedWindows.removeValue(forKey: removedKey)
             tiler_log("Removed window \(windowID) from workspace \(wsID)")
             return
           }
@@ -1171,8 +1168,7 @@ public class WindowManager {
       let list = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
     else { return nil }
-    let screenHeight =
-      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
     var matches: [CGWindowID] = []
     for info in list {
       guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
@@ -1208,8 +1204,7 @@ public class WindowManager {
       let list = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
     else { return nil }
-    let screenHeight =
-      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
     for info in list {
       guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
         let wid = info[kCGWindowNumber as String] as? CGWindowID,
