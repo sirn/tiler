@@ -27,16 +27,23 @@ public struct ReconcilePlan: Equatable {
   public let toReap: Set<CGWindowID>
   public let updatedMissingCounts: [CGWindowID: Int]
   public let hasPendingMiss: Bool
+  public let updatedResolveCounts: [CGWindowID: Int]
+  public let hasPendingResolve: Bool
 }
 
 /// Pure membership diff. Inputs are plain facts gathered by the caller.
 /// missThreshold is the consecutive-miss count required before reaping.
+/// unresolvedIDs are CGWindowList candidates that could not be tiled this pass
+/// (no AX element yet, or not tileable). resolveThreshold bounds the retry budget.
 public func reconcilePlan(
   managedIDs: Set<CGWindowID>,
   stillAliveIDs: Set<CGWindowID>,
   tileableIDs: Set<CGWindowID>,
   missingCounts: [CGWindowID: Int],
-  missThreshold: Int
+  missThreshold: Int,
+  unresolvedIDs: Set<CGWindowID> = [],
+  resolveCounts: [CGWindowID: Int] = [:],
+  resolveThreshold: Int = 8
 ) -> ReconcilePlan {
   var counts = missingCounts
   var toReap: Set<CGWindowID> = []
@@ -51,6 +58,18 @@ public func reconcilePlan(
   counts = counts.filter { managedIDs.contains($0.key) }
   let hasPendingMiss = counts.values.contains { $0 == 1 }
   let toAdd = tileableIDs.subtracting(managedIDs)
+
+  var resolve = resolveCounts
+  var hasPendingResolve = false
+  for id in unresolvedIDs {
+    let n = (resolve[id] ?? 0) + 1
+    resolve[id] = n
+    if n < resolveThreshold { hasPendingResolve = true }
+  }
+  // Keep counts only for ids still unresolved this pass (resolved/gone ids drop out)
+  resolve = resolve.filter { unresolvedIDs.contains($0.key) }
+
   return ReconcilePlan(
-    toAdd: toAdd, toReap: toReap, updatedMissingCounts: counts, hasPendingMiss: hasPendingMiss)
+    toAdd: toAdd, toReap: toReap, updatedMissingCounts: counts, hasPendingMiss: hasPendingMiss,
+    updatedResolveCounts: resolve, hasPendingResolve: hasPendingResolve)
 }
