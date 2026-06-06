@@ -782,7 +782,29 @@ public class WindowManager {
           element, "AXFullscreen" as CFString, !isFullscreen as CFTypeRef)
         tiler_log("Toggled fullscreen on window \(window.id)")
       }
+
+    case .consumeOrExpelLeft:
+      consumeOrExpelFocused(.left)
+    case .consumeOrExpelRight:
+      consumeOrExpelFocused(.right)
     }
+  }
+
+  private func consumeOrExpelFocused(_ direction: HorizontalDirection) {
+    guard let screenID = activeScreenID(), let wsID = activeWorkspaceID(),
+      var screenState = state.screens[screenID],
+      var workspace = screenState.workspaces[wsID]
+    else { return }
+    guard let result = consumeOrExpel(
+      columns: workspace.columns,
+      focusedColumnIndex: workspace.focusedColumnIndex,
+      direction: direction)
+    else { return }
+    workspace.columns = result.columns
+    workspace.focusedColumnIndex = result.focusedColumnIndex
+    screenState.workspaces[wsID] = workspace
+    state.screens[screenID] = screenState
+    setNeedsRetile()
   }
 
   // MARK: - Focus helpers

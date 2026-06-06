@@ -333,6 +333,91 @@ final class TilerCoreTests: XCTestCase {
     XCTAssertNil(plan.updatedMissingCounts[9])
   }
 
+  // MARK: - consumeOrExpel tests
+
+  func testConsumeLoneIntoLeft() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 1, direction: .left)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 1)
+    XCTAssertEqual(result!.columns[0].windows, [w1, w2])
+    XCTAssertEqual(result!.focusedColumnIndex, 0)
+    XCTAssertEqual(result!.columns[0].focusedWindowIndex, 1)
+  }
+
+  func testExpelStackedToRight() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .right)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 2)
+    XCTAssertEqual(result!.columns[0].windows, [w1])
+    XCTAssertEqual(result!.columns[1].windows, [w2])
+    XCTAssertEqual(result!.focusedColumnIndex, 1)
+  }
+
+  func testExpelStackedToLeft() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .left)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 2)
+    XCTAssertEqual(result!.columns[0].windows, [w2])
+    XCTAssertEqual(result!.columns[1].windows, [w1])
+    XCTAssertEqual(result!.focusedColumnIndex, 0)
+  }
+
+  func testConsumeNoLeftNeighborIsNoop() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .left)
+    XCTAssertNil(result)
+  }
+
+  func testConsumeNoRightNeighborIsNoop() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 1, direction: .right)
+    XCTAssertNil(result)
+  }
+
+  func testRoundTripConsumeThenExpel() {
+    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
+    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
+    let initial = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    // Consume col1 into left neighbor → [[w1, w2]], focusedColumnIndex 0
+    let consumed = consumeOrExpel(columns: initial, focusedColumnIndex: 1, direction: .left)
+    XCTAssertNotNil(consumed)
+    // Expel w2 back to the right → [[w1], [w2]], focusedColumnIndex 1
+    let expelled = consumeOrExpel(
+      columns: consumed!.columns,
+      focusedColumnIndex: consumed!.focusedColumnIndex,
+      direction: .right)
+    XCTAssertNotNil(expelled)
+    XCTAssertEqual(expelled!.columns.count, 2)
+    XCTAssertEqual(expelled!.columns[0].windows, [w1])
+    XCTAssertEqual(expelled!.columns[1].windows, [w2])
+    XCTAssertEqual(expelled!.focusedColumnIndex, 1)
+  }
+
   // MARK: - Variable-width boundary and reflow tests
 
   // Variable-width columns: focused col cannot left-flush past maxScroll.
