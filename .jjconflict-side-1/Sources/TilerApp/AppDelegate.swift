@@ -116,6 +116,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Misc
     bindings[.parse("ctrl+alt+t")!] = .toggleColumnTabbed
     bindings[.parse("ctrl+alt+q")!] = .closeWindow
+    bindings[.parse("ctrl+alt+bracketleft")!] = .consumeOrExpelLeft
+    bindings[.parse("ctrl+alt+bracketright")!] = .consumeOrExpelRight
 
     return bindings
   }
