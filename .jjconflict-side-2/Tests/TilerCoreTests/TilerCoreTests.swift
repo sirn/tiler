@@ -185,9 +185,6 @@ final class TilerCoreTests: XCTestCase {
   // whose right edge exceeds the usable area (no spill regardless of which column
   // is focused or what the starting offset is).
   func testLayoutNoWindowSpill() {
-    let win0 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w0")
-    let win1 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w1")
-    let win2 = WindowNode(id: 3, groupKey: GroupKey(value: 3), pid: 1, title: "w2")
     let ws = Workspace(
       id: 1,
       columns: [
@@ -312,6 +309,7 @@ final class TilerCoreTests: XCTestCase {
   func testReappearResetsMissCount() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [1], tileableIDs: [1],
+      missingCounts: [:], missThreshold: 2)
     XCTAssertEqual(plan.updatedMissingCounts[1], 0)
     XCTAssertEqual(plan.toReap, [])
     XCTAssertFalse(plan.hasPendingMiss)
@@ -332,61 +330,119 @@ final class TilerCoreTests: XCTestCase {
     XCTAssertNil(plan.updatedMissingCounts[9])
   }
 
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
-    let w1 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w2")
+  // MARK: - reconcilePlan resolve-retry tests
 
-  // MARK: - swapBackingID tests
-
-  func testSwapBackingIDPreservesGroupKey() {
-    let g = GroupKey(value: 42)
-    let columns = [
-      Column(windows: [WindowNode(id: 100, groupKey: g, pid: 7, title: "old")], widthFraction: 0.5)
-    ]
-    let result = swapBackingID(in: columns, from: 100, to: 200, title: "new")
-    XCTAssertNotNil(result)
-    let node = result![0].windows[0]
-    XCTAssertEqual(node.id, 200)        // backing id changed
-    XCTAssertEqual(node.groupKey, g)    // stable identity preserved — the invariant
-    XCTAssertEqual(node.pid, 7)         // pid preserved
-    XCTAssertEqual(node.title, "new")   // title updated
+  func testUnresolvedIdIncrementsCountAndSetsPendingResolve() {
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [42], resolveCounts: [:], resolveThreshold: 8)
+    XCTAssertEqual(plan.updatedResolveCounts[42], 1)
+    XCTAssertTrue(plan.hasPendingResolve)
   }
 
-  func testSwapBackingIDPreservesPositionAndOtherTiles() {
-    let gA = GroupKey(value: 1)
-    let gB = GroupKey(value: 2)
-    let columns = [
-      Column(
-        windows: [
-          WindowNode(id: 10, groupKey: gA, pid: 1, title: "a"),
-          WindowNode(id: 11, groupKey: gB, pid: 1, title: "b"),
-        ], focusedWindowIndex: 1, widthFraction: 0.5)
-    ]
-    let result = swapBackingID(in: columns, from: 11, to: 99, title: "b2")
-    XCTAssertNotNil(result)
-    // First tile untouched
-    XCTAssertEqual(result![0].windows[0].id, 10)
-    XCTAssertEqual(result![0].windows[0].groupKey, gA)
-    // Second tile: id swapped in place, groupKey + position preserved
-    XCTAssertEqual(result![0].windows[1].id, 99)
-    XCTAssertEqual(result![0].windows[1].groupKey, gB)
-    XCTAssertEqual(result![0].focusedWindowIndex, 1)
+  func testUnresolvedIdAtThresholdStopsPendingResolve() {
+    // count reaches resolveThreshold on this pass (7 + 1 = 8 >= 8)
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [42], resolveCounts: [42: 7], resolveThreshold: 8)
+    XCTAssertEqual(plan.updatedResolveCounts[42], 8)
+    XCTAssertFalse(plan.hasPendingResolve)
   }
 
-  func testSwapBackingIDNoMatchReturnsNil() {
-    let columns = [
-      Column(windows: [WindowNode(id: 100, groupKey: GroupKey(value: 1), pid: 1, title: "x")], widthFraction: 0.5)
+  func testResolvedIdDropsFromResolveCounts() {
+    // id 42 was previously unresolved but is absent from unresolvedIDs this pass
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [42: 3], resolveThreshold: 8)
+    XCTAssertNil(plan.updatedResolveCounts[42])
+    XCTAssertFalse(plan.hasPendingResolve)
+  }
+
+  func testExistingToAddBehaviorUnaffectedWithEmptyResolveParams() {
+    let plan = reconcilePlan(
+      managedIDs: [1], stillAliveIDs: [1], tileableIDs: [1, 2],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
+    XCTAssertEqual(plan.toAdd, [2])
+    XCTAssertEqual(plan.toReap, [])
+    XCTAssertFalse(plan.hasPendingResolve)
+    XCTAssertTrue(plan.updatedResolveCounts.isEmpty)
+  }
+
+  // MARK: - consumeOrExpel tests
+
+  func testConsumeLoneIntoLeft() {
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
     ]
-    XCTAssertNil(swapBackingID(in: columns, from: 999, to: 200, title: "y"))
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 1, direction: .left)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 1)
+    XCTAssertEqual(result!.columns[0].windows, [w1, w2])
+    XCTAssertEqual(result!.focusedColumnIndex, 0)
+    XCTAssertEqual(result!.columns[0].focusedWindowIndex, 1)
+  }
+
+  func testExpelStackedToRight() {
+    let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .right)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 2)
+    XCTAssertEqual(result!.columns[0].windows, [w1])
+    XCTAssertEqual(result!.columns[1].windows, [w2])
+    XCTAssertEqual(result!.focusedColumnIndex, 1)
+  }
+
+  func testExpelStackedToLeft() {
+    let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .left)
+    XCTAssertNotNil(result)
+    XCTAssertEqual(result!.columns.count, 2)
+    XCTAssertEqual(result!.columns[0].windows, [w2])
+    XCTAssertEqual(result!.columns[1].windows, [w1])
+    XCTAssertEqual(result!.focusedColumnIndex, 0)
+  }
+
+  func testConsumeNoLeftNeighborIsNoop() {
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .left)
+    XCTAssertNil(result)
+  }
+
+  func testConsumeNoRightNeighborIsNoop() {
+    let cols = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    let result = consumeOrExpel(columns: cols, focusedColumnIndex: 1, direction: .right)
+    XCTAssertNil(result)
+  }
+
+  func testRoundTripConsumeThenExpel() {
+    let initial = [
+      Column(windows: [w1], focusedWindowIndex: 0),
+      Column(windows: [w2], focusedWindowIndex: 0),
+    ]
+    // Consume col1 into left neighbor → [[w1, w2]], focusedColumnIndex 0
+    let consumed = consumeOrExpel(columns: initial, focusedColumnIndex: 1, direction: .left)
+    XCTAssertNotNil(consumed)
+    // Expel w2 back to the right → [[w1], [w2]], focusedColumnIndex 1
+    let expelled = consumeOrExpel(
+      columns: consumed!.columns,
+      focusedColumnIndex: consumed!.focusedColumnIndex,
+      direction: .right)
+    XCTAssertNotNil(expelled)
+    XCTAssertEqual(expelled!.columns.count, 2)
+    XCTAssertEqual(expelled!.columns[0].windows, [w1])
+    XCTAssertEqual(expelled!.columns[1].windows, [w2])
+    XCTAssertEqual(expelled!.focusedColumnIndex, 1)
   }
 
   // MARK: - Variable-width boundary and reflow tests
