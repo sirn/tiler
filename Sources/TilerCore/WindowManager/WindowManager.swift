@@ -393,10 +393,12 @@ public class WindowManager {
           consumed.insert(preferred.id)
           adjustedToAdd.remove(newID)
           tiler_debug("Native tab swap: wid \(preferred.id) -> \(newID)")
+          tiler_log("DIAG: tab-swap \(preferred.id) -> \(newID)")
         } else {
           // Case B: the managed window still backs this tile; suppress the redundant sibling.
           adjustedToAdd.remove(newID)
           tiler_debug("Native tab sibling suppressed: wid \(newID) (live tile \(preferred.id))")
+          tiler_log("DIAG: tab-suppress \(newID) (live \(preferred.id))")
         }
       }
     }
@@ -485,28 +487,6 @@ public class WindowManager {
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     guard let wid = windowStore.windowID(for: element) else { return }
-    // A native tab switch within a managed group emits only a focus change (no window
-    // created/destroyed), so the newly focused tab's id is not in our state yet while a
-    // sibling tab from the same group still backs the tile. Match the focused window's
-    // frame to a managed same-pid tile and adopt the new id in place, so focus tracking
-    // and later raise-on-navigate-back target the current tab rather than the stale one.
-    if !isManaged(wid),
-      let focusedFrame = AXWindowBridge.currentFrame(for: element),
-      let oldID = managedTabTile(pid: pid, frame: focusedFrame, excluding: wid)
-    {
-      var titleRef: CFTypeRef?
-      let title =
-        (AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef) == .success
-          ? titleRef as? String : nil) ?? ""
-      swapWindowID(from: oldID, to: wid, title: title)
-      if let record = appliedWindows[oldID] { appliedWindows[wid] = record }
-      appliedWindows.removeValue(forKey: oldID)
-      missingCounts.removeValue(forKey: oldID)
-      resolveCounts.removeValue(forKey: oldID)
-      // Refresh the window store so element(for: wid) resolves for the new active tab.
-      setNeedsReconcile()
-      tiler_debug("Native tab focus adopt: wid \(oldID) -> \(wid)")
-    }
     updateFocus(windowID: wid)
   }
 
@@ -999,7 +979,11 @@ public class WindowManager {
     let col = workspace.columns[workspace.focusedColumnIndex]
     guard col.focusedWindowIndex < col.windows.count else { return }
     let window = col.windows[col.focusedWindowIndex]
-    guard let element = windowStore.element(for: window.id) else { return }
+    tiler_log("DIAG: focusFocusedWindow raising wid=\(window.id) pid=\(window.pid) title='\(window.title)'")
+    guard let element = windowStore.element(for: window.id) else {
+      tiler_log("DIAG: focusFocusedWindow NO element for wid=\(window.id)")
+      return
+    }
 
     // Raise the window
     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
