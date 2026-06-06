@@ -111,7 +111,9 @@ public enum LayoutEngine {
         let windowHeight =
           (colHeight - gaps.innerGaps * CGFloat(column.windows.count - 1))
           / CGFloat(column.windows.count)
-        var windowY = usableRect.minY
+        // Cocoa y is bottom-origin; lay out the stack top-down so windows[0] is the
+        // topmost window (matches the up/down action semantics, where index 0 = top).
+        var windowY = usableRect.maxY - windowHeight
 
         for window in column.windows {
           let frame = NSRect(
@@ -124,7 +126,7 @@ public enum LayoutEngine {
           tiler_debug(
             "[LayoutEngine]     window \(window.id) → frame(\(String(format: "%.1f", frame.minX)), \(String(format: "%.1f", frame.minY)), \(String(format: "%.1f", frame.width)), \(String(format: "%.1f", frame.height)))"
           )
-          windowY += windowHeight + gaps.innerGaps
+          windowY -= windowHeight + gaps.innerGaps
         }
 
       case .tab:
