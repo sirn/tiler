@@ -52,6 +52,7 @@ public class EventBroker {
         self.onEvent?(.appTerminated(pid))
       })
 
+
     // Register for already-running apps
     for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
       registerAppObserver(pid: app.processIdentifier)
