@@ -16,9 +16,11 @@ public struct ScreenState {
 }
 
 public struct TilerState {
-  public var screens: [ScreenID: ScreenState]
+public var screens: [ScreenID: ScreenState]
+public var tabbedPIDs: Set<pid_t>
 
-  public init(screens: [ScreenID: ScreenState] = [:]) {
-    self.screens = screens
-  }
+public init(screens: [ScreenID: ScreenState] = [:], tabbedPIDs: Set<pid_t> = []) {
+  self.screens = screens
+  self.tabbedPIDs = tabbedPIDs
+}
 }

@@ -39,6 +39,7 @@ public class WindowManager {
   private var resolveCounts: [CGWindowID: Int] = [:]
   private var resolveRetryToken: UInt64 = 0
 
+
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
     self.gaps = GapConfig(
@@ -196,6 +197,7 @@ public class WindowManager {
     case .appTerminated(let pid):
       windowStore.forget(pid: pid)
       removeWindowsForPID(pid)
+      state.tabbedPIDs.remove(pid)
       setNeedsRetile()
     case .windowCreated:
       setNeedsReconcile()
@@ -393,7 +395,8 @@ public class WindowManager {
 
     // Apply tab swaps: replace old WID with new WID in-place
     for (oldWID, newWID) in tabSwaps {
-        guard let (_, newTitle, _) = windowInfo[newWID] else { continue }
+        guard let (newPID, newTitle, _) = windowInfo[newWID] else { continue }
+        state.tabbedPIDs.insert(newPID)
         swapWindowID(from: oldWID, to: newWID, title: newTitle)
         // Transfer the applied frame so the new window inherits the old window's
         // expected geometry — macOS typically positions the new tab at the same
@@ -480,8 +483,81 @@ public class WindowManager {
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-    guard let wid = windowStore.windowID(for: element) else { return }
-    updateFocus(windowID: wid)
+    tiler_log("handleFocusChanged: pid=\(pid)")
+    guard let wid = windowStore.windowID(for: element) else {
+      tiler_log("handleFocusChanged: could not get windowID for element")
+      return
+    }
+
+    // Fast path: WID is already managed.
+    let managedIDs = Set(
+      state.screens.values
+        .flatMap { $0.workspaces.values }
+        .flatMap { $0.columns }
+        .flatMap { $0.windows }
+        .map { $0.id })
+    if managedIDs.contains(wid) {
+      tiler_log("handleFocusChanged: fast path wid=\(wid) updating focus")
+      windowStore.register(id: wid, pid: pid, element: element)
+      updateFocus(windowID: wid)
+      return
+    }
+
+    // Slow path: unknown WID — native tab switch replaced the active CGWindow
+    // without firing kAXWindowCreatedNotification. Backfill synchronously.
+    guard let newFrame = AXWindowBridge.currentFrame(for: element) else {
+      tiler_log("handleFocusChanged: could not get currentFrame")
+      return
+    }
+    guard let screenID = activeScreenID() else {
+      tiler_log("handleFocusChanged: no activeScreenID")
+      return
+    }
+    guard let wsID = activeWorkspaceID() else {
+      tiler_log("handleFocusChanged: no activeWorkspaceID")
+      return
+    }
+    guard let workspace = state.screens[screenID]?.workspaces[wsID] else {
+      tiler_log("handleFocusChanged: no workspace for screen=\(screenID) ws=\(wsID)")
+      return
+    }
+
+    for col in workspace.columns {
+      for win in col.windows where win.pid == pid {
+        let oldID = win.id
+        let appliedDeltaX = abs(newFrame.minX - (appliedWindows[oldID]?.frame.minX ?? .greatestFiniteMagnitude))
+        
+        // Check against applied frame first, then observed (current) frame as fallback
+        var frameMatch = appliedDeltaX < 10
+        if !frameMatch, let oldElement = windowStore.element(for: oldID) {
+          if let oldFrame = AXWindowBridge.currentFrame(for: oldElement) {
+            frameMatch = abs(newFrame.minX - oldFrame.minX) < 10
+            if frameMatch {
+              tiler_log("FocusTabSwap: frame match via observed frame for \(oldID)")
+            }
+          }
+        }
+        
+        guard frameMatch else { continue }
+        
+        var titleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+        let title = titleRef as? String ?? ""
+
+        swapWindowID(from: oldID, to: wid, title: title)
+        if let record = appliedWindows[oldID] {
+          appliedWindows[wid] = record
+        }
+        appliedWindows.removeValue(forKey: oldID)
+        missingCounts.removeValue(forKey: oldID)
+        resolveCounts.removeValue(forKey: oldID)
+        windowStore.register(id: wid, pid: pid, element: element)
+        updateFocus(windowID: wid)
+        tiler_log("FocusTabSwap: \(oldID) → \(wid) pid=\(pid)")
+        state.tabbedPIDs.insert(pid)
+        return
+      }
+    }
   }
 
   // MARK: - State mutations
@@ -935,6 +1011,7 @@ public class WindowManager {
     setNeedsRetile()
   }
 
+
   // MARK: - Focus helpers
 
   private func focusFocusedWindow(in workspace: Workspace) {
@@ -944,18 +1021,33 @@ public class WindowManager {
     let col = workspace.columns[workspace.focusedColumnIndex]
     guard col.focusedWindowIndex < col.windows.count else { return }
     let window = col.windows[col.focusedWindowIndex]
-    guard let element = windowStore.element(for: window.id) else { return }
+    tiler_log("focusFocusedWindow: target wid=\(window.id) pid=\(window.pid) title='\(window.title)'")
 
-    // Raise the window
-    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-    // Set as key window
-    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    guard let app = NSRunningApplication(processIdentifier: window.pid) else { return }
 
-    // Activate the app to ensure keyboard focus follows
-    if let app = NSRunningApplication(processIdentifier: window.pid) {
+    // Native-tab apps (e.g. Ghostty) swap the active CGWindowID when the user switches
+    // tabs internally. Raising a specific window would override that choice, so for a
+    // PID we've seen do a tab swap, only activate the app and let it keep its tab.
+    if state.tabbedPIDs.contains(window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
+      tiler_log("focusFocusedWindow: tabbed app, activated pid=\(window.pid) without raise")
+      return
     }
+
+    guard let element = windowStore.element(for: window.id) else {
+      app.activate(options: [.activateIgnoringOtherApps])
+      tiler_log("focusFocusedWindow: no element for wid=\(window.id), activated app anyway")
+      return
+    }
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    app.activate(options: [.activateIgnoringOtherApps])
+    tiler_log("focusFocusedWindow: raised+\(window.id) and activated pid=\(window.pid)")
   }
+
+
+
+
 
   // MARK: - Workspace-specific tiling
 

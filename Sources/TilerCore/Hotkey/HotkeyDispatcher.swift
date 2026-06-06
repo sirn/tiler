@@ -71,12 +71,16 @@ public class HotkeyDispatcher {
       if let tap = self.tap {
         CGEvent.tapEnable(tap: tap, enable: true)
       }
+      tiler_log("Event tap disabled (type=\(type.rawValue)), re-enabling and passing event through")
       return Unmanaged.passUnretained(event)
     }
 
     guard type == .keyDown else {
+      tiler_log("Non-keyDown event (type=\(type.rawValue)), passing through")
       return Unmanaged.passUnretained(event)
     }
+
+    tiler_log("keyDown event received: keyCode=\(event.getIntegerValueField(.keyboardEventKeycode)), flags=\(event.flags)")
 
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
@@ -92,10 +96,12 @@ public class HotkeyDispatcher {
           self.handler?(action)
         }
         // Consume the event so it doesn't propagate to the active app
+        tiler_log("Consumed keyDown: keyCode=\(keyCode), action=\(action), event will not propagate")
         return nil
       }
     }
 
+    tiler_log("No binding matched keyCode=\(keyCode) with flags=\(flags), passing event through")
     return Unmanaged.passUnretained(event)
   }
 }
