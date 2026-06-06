@@ -188,7 +188,7 @@ public class WindowManager {
     self.appRules = config.appRules
 
     let oldCount = workspaceCount
-    self.workspaceCount = max(1, config.workspaces.count)
+    self.workspaceCount = config.workspaces.count
 
     if oldCount != workspaceCount {
       for (screenID, var screenState) in state.screens {
@@ -601,7 +601,7 @@ public class WindowManager {
 
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
-    tiler_debug(
+    tiler_log(
       "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
     )
   }
@@ -621,8 +621,36 @@ public class WindowManager {
     }
   }
 
-            let removedKey = column.windows[removeIdx].groupKey
-            appliedWindows.removeValue(forKey: removedKey)
+  private func removeWindow(windowID: CGWindowID) {
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        for (colIdx, var column) in workspace.columns.enumerated() {
+          if let removeIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
+            column.windows.remove(at: removeIdx)
+
+            if column.windows.isEmpty {
+              workspace.columns.remove(at: colIdx)
+              if workspace.focusedColumnIndex >= workspace.columns.count
+                && !workspace.columns.isEmpty
+              {
+                workspace.focusedColumnIndex = workspace.columns.count - 1
+              }
+            } else {
+              if column.focusedWindowIndex >= column.windows.count {
+                column.focusedWindowIndex = column.windows.count - 1
+              }
+              workspace.columns[colIdx] = column
+            }
+
+            screenState.workspaces[wsID] = workspace
+            state.screens[screenID] = screenState
+            tiler_log("Removed window \(windowID) from workspace \(wsID)")
+            return
+          }
+        }
+      }
+    }
+  }
 
   private func removeWindowsForPID(_ pid: pid_t) {
     for (screenID, var screenState) in state.screens {
@@ -969,10 +997,10 @@ public class WindowManager {
       let window = col.windows[col.focusedWindowIndex]
       guard let element = windowStore.element(for: window.id) else { return }
       var fullscreen: CFTypeRef?
-      let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullscreen)
+      let result = AXUIElementCopyAttributeValue(element, "AXFullscreen" as CFString, &fullscreen)
       if result == .success, let isFullscreen = fullscreen as? Bool {
         AXUIElementSetAttributeValue(
-          element, "AXFullScreen" as CFString, !isFullscreen as CFTypeRef)
+          element, "AXFullscreen" as CFString, !isFullscreen as CFTypeRef)
         tiler_log("Toggled fullscreen on window \(window.id)")
       }
 
@@ -1242,16 +1270,17 @@ public class WindowManager {
   }
 
   private func hideInactiveWorkspaces() {
-    guard activeScreenID() != nil, activeWorkspaceID() != nil
+    guard let activeScr = activeScreenID(),
+      let activeWS = activeWorkspaceID()
     else { return }
 
     var frames: [CGWindowID: NSRect] = [:]
 
-    for (_, screenState) in state.screens {
+    for (screenID, screenState) in state.screens {
       let visibleFrame = screenState.info.visibleFrame
       for (wsID, workspace) in screenState.workspaces {
-        // Only park windows that are NOT on the active workspace of each screen
-        guard wsID != screenState.activeWorkspaceID else { continue }
+        // Only park windows that are NOT on the active workspace of the active screen
+        guard !(screenID == activeScr && wsID == activeWS) else { continue }
         for column in workspace.columns {
           for window in column.windows {
             let wid = window.id

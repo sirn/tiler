@@ -210,6 +210,25 @@ public final class WindowStore {
     return elements[id]
   }
 
+  /// Resolve the AXUIElement for a specific (pid, wid) by scanning the app's current AX
+  /// windows. Used when the cached map may be stale, e.g. just after a native tab switch.
+  public func liveElement(forPID pid: pid_t, wid: CGWindowID) -> AXUIElement? {
+    let appElement = AXUIElementCreateApplication(pid)
+    var windowsRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        == .success,
+      let axWindows = windowsRef as? [AXUIElement]
+    else { return nil }
+    for axWindow in axWindows {
+      var w: CGWindowID = 0
+      if _AXUIElementGetWindow(axWindow, &w) == .success, w == wid {
+        return axWindow
+      }
+    }
+    return nil
+  }
+
   /// Get the CGWindowID for an AXUIElement via _AXUIElementGetWindow.
   public func windowID(for element: AXUIElement) -> CGWindowID? {
     var wid: CGWindowID = 0
