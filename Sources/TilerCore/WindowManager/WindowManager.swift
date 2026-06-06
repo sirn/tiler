@@ -36,6 +36,8 @@ public class WindowManager {
   private var appliedWindows: [CGWindowID: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
+  private var resolveCounts: [CGWindowID: Int] = [:]
+  private var resolveRetryToken: UInt64 = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -249,6 +251,7 @@ public class WindowManager {
     }
 
     var tileableIDs: Set<CGWindowID> = []
+    var unresolvedCandidates: Set<CGWindowID> = []
     var windowInfo: [CGWindowID: (pid: pid_t, title: String)] = [:]
     var skippedNoElement = 0
     var skippedNotTileable = 0
@@ -270,10 +273,12 @@ public class WindowManager {
           tileableIDs.insert(wid)
         } else {
           skippedNotTileable += 1
+          unresolvedCandidates.insert(wid)
           tiler_debug("reconcile: skip not-tileable wid=\(wid) title='\(title)' pid=\(pid)")
         }
       } else {
         skippedNoElement += 1
+        unresolvedCandidates.insert(wid)
         tiler_debug("reconcile: skip no-element wid=\(wid) title='\(title)' pid=\(pid)")
       }
     }
@@ -314,8 +319,12 @@ public class WindowManager {
       stillAliveIDs: stillAlive,
       tileableIDs: tileableIDs,
       missingCounts: missingCounts,
-      missThreshold: 2)
+      missThreshold: 2,
+      unresolvedIDs: unresolvedCandidates.subtracting(managedIDs),
+      resolveCounts: resolveCounts,
+      resolveThreshold: 8)
     missingCounts = plan.updatedMissingCounts
+    resolveCounts = plan.updatedResolveCounts
 
     // Remove windows that have been consistently missing (destroyed, minimized, fullscreen).
     // Off-screen-parked windows remain in stillAlive and are preserved.
@@ -350,6 +359,19 @@ public class WindowManager {
     // a genuinely-closed window gets its second strike promptly.
     if plan.hasPendingMiss {
       setNeedsReconcile()
+    }
+
+    // Additions counterpart to the removal retry: when a candidate window has no AX element
+    // yet (or isn't tileable yet), schedule a delayed reconcile to re-check. The delay gives
+    // the AX tree time to map the new window's element. Bounded by resolveThreshold so
+    // permanently-unresolvable windows stop retrying after a fixed number of attempts.
+    if plan.hasPendingResolve {
+      resolveRetryToken &+= 1
+      let token = resolveRetryToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        guard let self = self, self.resolveRetryToken == token else { return }
+        self.setNeedsReconcile()
+      }
     }
 
     // Add new windows
