@@ -88,8 +88,7 @@ public enum AXWindowBridge {
 
   /// Check if two frames match within tolerance.
   static func framesMatch(_ a: NSRect, _ b: NSRect, tolerance: CGFloat) -> Bool {
-    return abs(a.minX - b.minX) < tolerance && abs(a.minY - b.minY) < tolerance
-      && abs(a.width - b.width) < tolerance && abs(a.height - b.height) < tolerance
+    return TilerCore.framesMatch(a, b, tolerance: tolerance)
   }
 
   /// Read the current AX frame for an element using the primary screen height.
