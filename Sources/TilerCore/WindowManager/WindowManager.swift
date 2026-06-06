@@ -485,6 +485,28 @@ public class WindowManager {
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     guard let wid = windowStore.windowID(for: element) else { return }
+    // A native tab switch within a managed group emits only a focus change (no window
+    // created/destroyed), so the newly focused tab's id is not in our state yet while a
+    // sibling tab from the same group still backs the tile. Match the focused window's
+    // frame to a managed same-pid tile and adopt the new id in place, so focus tracking
+    // and later raise-on-navigate-back target the current tab rather than the stale one.
+    if !isManaged(wid),
+      let focusedFrame = AXWindowBridge.currentFrame(for: element),
+      let oldID = managedTabTile(pid: pid, frame: focusedFrame, excluding: wid)
+    {
+      var titleRef: CFTypeRef?
+      let title =
+        (AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef) == .success
+          ? titleRef as? String : nil) ?? ""
+      swapWindowID(from: oldID, to: wid, title: title)
+      if let record = appliedWindows[oldID] { appliedWindows[wid] = record }
+      appliedWindows.removeValue(forKey: oldID)
+      missingCounts.removeValue(forKey: oldID)
+      resolveCounts.removeValue(forKey: oldID)
+      // Refresh the window store so element(for: wid) resolves for the new active tab.
+      setNeedsReconcile()
+      tiler_debug("Native tab focus adopt: wid \(oldID) -> \(wid)")
+    }
     updateFocus(windowID: wid)
   }
 
@@ -635,6 +657,36 @@ public class WindowManager {
         }
       }
     }
+  }
+
+  /// True when the given window id is tracked in any workspace.
+  private func isManaged(_ wid: CGWindowID) -> Bool {
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          if column.windows.contains(where: { $0.id == wid }) { return true }
+        }
+      }
+    }
+    return false
+  }
+
+  /// Find a managed window in the active workspace from the same pid whose last applied
+  /// frame matches `frame` (a native-tab sibling sharing the tab group's frame).
+  private func managedTabTile(pid: pid_t, frame: NSRect, excluding wid: CGWindowID) -> CGWindowID? {
+    guard let screenID = activeScreenID(), let wsID = activeWorkspaceID(),
+      let workspace = state.screens[screenID]?.workspaces[wsID]
+    else { return nil }
+    // Both the focused element frame (from AX) and appliedWindows frames use Cocoa bottom-left
+    // origin, so all four edges are directly comparable.
+    for column in workspace.columns {
+      for win in column.windows where win.pid == pid && win.id != wid {
+        if let applied = appliedWindows[win.id]?.frame, framesMatch(applied, frame, tolerance: 10) {
+          return win.id
+        }
+      }
+    }
+    return nil
   }
 
   // MARK: - Action handling
