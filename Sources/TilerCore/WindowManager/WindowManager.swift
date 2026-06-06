@@ -85,6 +85,7 @@ public class WindowManager {
     if needsRetile {
       needsRetile = false
       retileActiveWorkspace()
+      hideInactiveWorkspaces()
     }
     if needsReconcile {
       needsReconcile = false
@@ -817,7 +818,6 @@ public class WindowManager {
       var screenState = state.screens[screenID],
       var workspace = screenState.workspaces[wsID]
     else {
-      hideWorkspace(wsID)
       return
     }
     let context = LayoutContext(screen: screenState.info, gaps: gaps)
@@ -836,35 +836,46 @@ public class WindowManager {
     }
   }
 
-  private func hideWorkspace(_ wsID: WorkspaceID) {
-    for (_, screenState) in state.screens {
-      guard let workspace = screenState.workspaces[wsID] else { continue }
-      var frames: [CGWindowID: NSRect] = [:]
-      for column in workspace.columns {
-        for window in column.windows {
-          frames[window.id] = NSRect(x: -100000, y: 0, width: 100, height: 100)
-        }
-      }
-      if !frames.isEmpty {
-        AXWindowBridge.applyFrames(frames, store: windowStore)
-        for (wid, frame) in frames {
-          applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: frame)
-        }
-      }
-      return
-    }
-  }
+  private func hideInactiveWorkspaces() {
+    guard let activeScr = activeScreenID(),
+      let activeWS = activeWorkspaceID()
+    else { return }
 
-  private func retileAll() {
-    guard let activeWSID = activeWorkspaceID() else { return }
-    retileWorkspace(activeWSID)
-    // Hide all other active workspaces across screens
+    var frames: [CGWindowID: NSRect] = [:]
+
     for (screenID, screenState) in state.screens {
-      for wsID in screenState.workspaces.keys
-      where wsID != activeWSID || screenID != activeScreenID() {
-        hideWorkspace(wsID)
+      let visibleFrame = screenState.info.visibleFrame
+      for (wsID, workspace) in screenState.workspaces {
+        // Only park windows that are NOT on the active workspace of the active screen
+        guard !(screenID == activeScr && wsID == activeWS) else { continue }
+        for column in workspace.columns {
+          for window in column.windows {
+            let wid = window.id
+            // Idempotency: already parked if record's minX is left of the visible area
+            if let record = applyRecords[wid], record.frame.minX < visibleFrame.minX {
+              continue
+            }
+            guard let element = windowStore.element(for: wid) else { continue }
+            guard let current = AXWindowBridge.currentFrame(for: element) else { continue }
+            // Park position-only: right edge lands 1px into visible area, size unchanged
+            let parked = NSRect(
+              x: visibleFrame.minX - current.width + 1,
+              y: current.minY,
+              width: current.width,
+              height: current.height)
+            frames[wid] = parked
+          }
+        }
       }
     }
+
+    guard !frames.isEmpty else { return }
+    // Record before applying so incoming AX events are treated as echoes
+    for (wid, parked) in frames {
+      applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: parked)
+    }
+    AXWindowBridge.applyFrames(frames, store: windowStore)
+    tiler_debug("Parked \(frames.count) windows from inactive workspaces")
   }
 
   // MARK: - Layout
