@@ -252,7 +252,7 @@ public class WindowManager {
 
     var tileableIDs: Set<CGWindowID> = []
     var unresolvedCandidates: Set<CGWindowID> = []
-    var windowInfo: [CGWindowID: (pid: pid_t, title: String)] = [:]
+    var windowInfo: [CGWindowID: (pid: pid_t, title: String, bounds: NSRect)] = [:]
     var skippedNoElement = 0
     var skippedNotTileable = 0
     var totalCandidates = 0
@@ -266,7 +266,14 @@ public class WindowManager {
 
       totalCandidates += 1
       let title = info[kCGWindowName as String] as? String ?? ""
-      windowInfo[wid] = (pid, title)
+      let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat]
+      let bounds = NSRect(
+        x: boundsDict?["X"] ?? 0,
+        y: boundsDict?["Y"] ?? 0,
+        width: boundsDict?["Width"] ?? 0,
+        height: boundsDict?["Height"] ?? 0
+      )
+      windowInfo[wid] = (pid, title, bounds)
 
       if let element = windowStore.element(for: wid) {
         if WindowFilter.isTileable(element) {
@@ -326,6 +333,84 @@ public class WindowManager {
     missingCounts = plan.updatedMissingCounts
     resolveCounts = plan.updatedResolveCounts
 
+    // Native tab swap detection: when a new window appears at the same position
+    // as an existing managed window from the same PID (e.g., macOS replacing the
+    // active tab with a new NSWindow), swap IDs in-place instead of adding a new
+    // column. Position matching handles the timing gap where the old window hasn't
+    // yet been moved off-screen when reconcile runs.
+    var tabSwaps: [CGWindowID: CGWindowID] = [:]  // oldWID → newWID
+    var adjustedToAdd = plan.toAdd
+
+    // Build PID lookup for windows in the active workspace
+    let activeWSID2 = activeWorkspaceID()
+    let activeScreenID2 = activeScreenID()
+    var activeWorkspacePIDs: [CGWindowID: pid_t] = [:]
+    if let sid2 = activeScreenID2, let wsid2 = activeWSID2,
+       let workspace2 = state.screens[sid2]?.workspaces[wsid2]
+    {
+        for col in workspace2.columns {
+            for win in col.windows {
+                activeWorkspacePIDs[win.id] = win.pid
+            }
+        }
+    }
+
+    tiler_log("TabSwap: plan.toAdd count=\(plan.toAdd.count) wids=\(plan.toAdd)")
+    for newWID in plan.toAdd {
+        guard let newInfo = windowInfo[newWID] else {
+            tiler_log("TabSwap: newWID=\(newWID) has no windowInfo, skipping")
+            continue
+        }
+        // Find managed windows from the same PID in the active workspace
+        let samePIDCandidates = activeWorkspacePIDs.filter { $0.value == newInfo.pid }
+        tiler_log("TabSwap: newWID=\(newWID) pid=\(newInfo.pid) bounds=\(newInfo.bounds) candidates=\(samePIDCandidates.count)")
+        guard !samePIDCandidates.isEmpty else { continue }
+
+        // For each candidate, check if the new window's position matches the old
+        // window's current frame (indicating a native tab replacement).
+        var swapDetected = false
+        for (candidateWID, _) in samePIDCandidates {
+            guard let oldAppliedFrame = appliedWindows[candidateWID]?.frame else {
+                tiler_log("TabSwap:   candidate=\(candidateWID) has no appliedFrame, skipping")
+                continue
+            }
+            let deltaX = abs(newInfo.bounds.minX - oldAppliedFrame.minX)
+            let deltaY = abs(newInfo.bounds.minY - oldAppliedFrame.minY)
+            tiler_debug("TabSwap:   candidate=\(candidateWID) oldAppliedFrame=\(oldAppliedFrame) deltaX=\(deltaX) deltaY=\(deltaY)")
+            if deltaX < 10 {
+                tiler_log("TabSwap:   ✓ SWAP DETECTED oldWID=\(candidateWID) → newWID=\(newWID)")
+                tabSwaps[candidateWID] = newWID
+                adjustedToAdd.remove(newWID)
+                swapDetected = true
+                break
+            }
+        }
+        if !swapDetected {
+            tiler_log("TabSwap:   no swap detected for newWID=\(newWID)")
+        }
+    }
+    tiler_log("TabSwap: total tabSwaps found=\(tabSwaps.count)")
+
+    // Apply tab swaps: replace old WID with new WID in-place
+    for (oldWID, newWID) in tabSwaps {
+        guard let (_, newTitle, _) = windowInfo[newWID] else { continue }
+        swapWindowID(from: oldWID, to: newWID, title: newTitle)
+        // Transfer the applied frame so the new window inherits the old window's
+        // expected geometry — macOS typically positions the new tab at the same
+        // screen location as the old tab, so this should match as an echo.
+        if let record = appliedWindows[oldWID] {
+            appliedWindows[newWID] = record
+        }
+        appliedWindows.removeValue(forKey: oldWID)
+        missingCounts.removeValue(forKey: oldWID)
+        resolveCounts.removeValue(forKey: oldWID)
+        tiler_debug("Tab swap: replaced wid=\(oldWID) with wid=\(newWID)")
+    }
+
+    if !tabSwaps.isEmpty {
+        setNeedsRetile()
+    }
+
     // Remove windows that have been consistently missing (destroyed, minimized, fullscreen).
     // Off-screen-parked windows remain in stillAlive and are preserved.
     var membershipChanged = false
@@ -375,8 +460,8 @@ public class WindowManager {
     }
 
     // Add new windows
-    for wid in plan.toAdd {
-      guard let (pid, title) = windowInfo[wid] else { continue }
+    for wid in adjustedToAdd {
+      guard let (pid, title, _) = windowInfo[wid] else { continue }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title)
       membershipChanged = true
     }
@@ -384,6 +469,7 @@ public class WindowManager {
     if membershipChanged {
       setNeedsRetile()
     }
+    tiler_log("TabSwap: membershipChanged=\(membershipChanged)")
 
     // Prune appliedWindows for windows no longer in state
     let liveIDs = Set(
@@ -445,6 +531,26 @@ public class WindowManager {
     tiler_log(
       "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
     )
+  }
+
+  /// Replace a managed window's ID in-place (for native tab ID swaps).
+  /// The new node inherits the old node's position in its column.
+  private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        for (colIdx, var column) in workspace.columns.enumerated() {
+          for (winIdx, win) in column.windows.enumerated() {
+            if win.id == oldID {
+              column.windows[winIdx] = WindowNode(id: newID, pid: win.pid, title: title)
+              workspace.columns[colIdx] = column
+              screenState.workspaces[wsID] = workspace
+              state.screens[screenID] = screenState
+              return
+            }
+          }
+        }
+      }
+    }
   }
 
   private func removeWindow(windowID: CGWindowID) {
