@@ -1,7 +1,7 @@
 # tiler example configuration
 # Copy to ~/.config/tiler/config.toml and uncomment/modify as needed.
 
-# ── General ──────────────────────────────────────────────────────────────
+# General
 
 [general]
 # Gap between the screen edge and the outermost windows (points).
@@ -11,7 +11,7 @@ inner_gaps = 6
 # Gap between adjacent columns.
 column_gaps = 8
 
-# ── Layout ───────────────────────────────────────────────────────────────
+# Layout
 
 [layout]
 # Width fraction for newly-created columns (0.0–1.0 of usable width).
@@ -19,13 +19,13 @@ default_column_width = 0.5
 # Whether to scroll the viewport so the focused column stays centred.
 center_focused_column = true
 
-# ── Workspaces ───────────────────────────────────────────────────────────
+# Workspaces
 
 [workspaces]
 # Number of workspaces (1…count). Default is 9.
 count = 9
 
-# ── Keybinds ─────────────────────────────────────────────────────────────
+# Keybinds
 # Each [[keybind]] entry maps a key combination to an action.
 # Available actions:
 #   focus_column_left       focus_column_right
@@ -114,7 +114,7 @@ action = "toggle_column_tabbed"
 keys = "ctrl+alt+q"
 action = "close_window"
 
-# ── App Rules ───────────────────────────────────────────────────────────
+# App Rules
 # Per-application overrides. `app` is matched against the app bundle name
 # or process name (case-insensitive substring match).
 #
