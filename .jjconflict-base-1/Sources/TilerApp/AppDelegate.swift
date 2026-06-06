@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var windowManager: WindowManager?
   private var hotkeyDispatcher: HotkeyDispatcher?
   private var configLoader: ConfigLoader?
+  private var statusBar: StatusBarController?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     // Ensure accessibility permissions are granted
@@ -38,6 +39,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Initialize screens and workspaces
     wm.initializeScreens()
+
+    // Menu bar workspace indicator
+    let statusBar = StatusBarController()
+    self.statusBar = statusBar
+    if let indicator = wm.workspaceIndicator() {
+      statusBar.update(occupied: indicator.occupied, current: indicator.current)
+    }
+    wm.onWorkspaceIndicatorChanged = { [weak statusBar] indicator in
+      statusBar?.update(occupied: indicator.occupied, current: indicator.current)
+    }
 
     // Reconcile existing windows (enumerate + diff against empty state)
     wm.reconcile()
