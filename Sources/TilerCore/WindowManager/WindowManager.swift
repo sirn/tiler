@@ -356,47 +356,41 @@ public class WindowManager {
       let vanished = Set(managedInActiveWS.map { $0.id }).subtracting(stillAlive)
       var consumed: Set<CGWindowID> = []
 
-      // CGWindowList bounds use top-left origin; appliedWindows frames use Cocoa bottom-left
-      // origin. Y is therefore not directly comparable across the two coordinate systems.
-      // X, width, and height are invariant to the origin flip and are sufficient for same-pid
-      // tab group matching.
-      func sameTabFrame(_ cgBounds: NSRect, _ applied: NSRect) -> Bool {
-        let tol: CGFloat = 10
-        return abs(cgBounds.origin.x - applied.origin.x) < tol
-          && abs(cgBounds.width - applied.width) < tol
-          && abs(cgBounds.height - applied.height) < tol
-      }
+      // The new window's CGWindowList bounds are top-left origin; managed tiles' applied
+      // frames are Cocoa bottom-left. Convert before matching so all four edges (including
+      // Y) are comparable — Y is essential to tell vertically-stacked same-pid windows apart.
+      let screenHeight =
+        NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
 
       for newID in adjustedToAdd.sorted() {
         guard let info = windowInfo[newID] else { continue }
+        let cocoaBounds = NSRect(
+          x: info.bounds.minX,
+          y: screenHeight - info.bounds.minY - info.bounds.height,
+          width: info.bounds.width,
+          height: info.bounds.height)
 
         let candidates = managedInActiveWS.filter { v in
-          v.pid == info.pid && !consumed.contains(v.id) && sameTabFrame(info.bounds, v.applied)
+          v.pid == info.pid && !consumed.contains(v.id)
+            && framesMatch(cocoaBounds, v.applied, tolerance: 10)
         }
-        guard !candidates.isEmpty else { continue }
+        // Only correlate on an unambiguous match. Zero or multiple same-pid tiles at this
+        // frame (e.g. several columns parked at the same off-screen edge) are ambiguous, so
+        // leave the new window to be added as its own column rather than risk swapping the
+        // wrong tile. A spurious column self-heals on a later reconcile; a wrong swap is
+        // silent, permanent corruption.
+        guard candidates.count == 1, let match = candidates.first else { continue }
 
-        // Prefer a vanished candidate (the tab that left) over a live one.
-        let preferred = candidates.first(where: { vanished.contains($0.id) })
-          ?? candidates.min(by: { a, b in
-            let da = abs(a.applied.origin.x - info.bounds.origin.x)
-              + abs(a.applied.width - info.bounds.width)
-              + abs(a.applied.height - info.bounds.height)
-            let db = abs(b.applied.origin.x - info.bounds.origin.x)
-              + abs(b.applied.width - info.bounds.width)
-              + abs(b.applied.height - info.bounds.height)
-            return da < db
-          })!
-
-        if vanished.contains(preferred.id) {
+        if vanished.contains(match.id) {
           // Case A: the managed window for this frame left — adopt the new active id in-place.
-          tabSwaps[preferred.id] = newID
-          consumed.insert(preferred.id)
+          tabSwaps[match.id] = newID
+          consumed.insert(match.id)
           adjustedToAdd.remove(newID)
-          tiler_debug("Native tab swap: wid \(preferred.id) -> \(newID)")
+          tiler_debug("Native tab swap: wid \(match.id) -> \(newID)")
         } else {
           // Case B: the managed window still backs this tile; suppress the redundant sibling.
           adjustedToAdd.remove(newID)
-          tiler_debug("Native tab sibling suppressed: wid \(newID) (live tile \(preferred.id))")
+          tiler_debug("Native tab sibling suppressed: wid \(newID) (live tile \(match.id))")
         }
       }
     }
@@ -635,6 +629,18 @@ public class WindowManager {
         }
       }
     }
+  }
+
+  /// True when the given window id is tracked by any tile in any workspace.
+  private func isManaged(_ wid: CGWindowID) -> Bool {
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          if column.windows.contains(where: { $0.id == wid }) { return true }
+        }
+      }
+    }
+    return false
   }
 
   // MARK: - Action handling
@@ -947,17 +953,121 @@ public class WindowManager {
     let col = workspace.columns[workspace.focusedColumnIndex]
     guard col.focusedWindowIndex < col.windows.count else { return }
     let window = col.windows[col.focusedWindowIndex]
-    guard let element = windowStore.element(for: window.id) else { return }
 
-    // Raise the window
+    var targetElement = windowStore.element(for: window.id)
+
+    // A native tab group has exactly one window in the on-screen CGWindowList (background
+    // tabs are absent), so the on-screen window matching this tile's frame is the group's
+    // currently-active tab. Switching tabs emits no usable notification, so our stored id
+    // can be a stale sibling; raising it would force the app back to that tab. Resolve the
+    // active tab and adopt its id in place, then raise it (a no-op for tab selection).
+    if let tileFrame = appliedWindows[window.id]?.frame,
+      let active = currentActiveTab(pid: window.pid, tileFrame: tileFrame, currentID: window.id),
+      active.wid != window.id
+    {
+      swapWindowID(from: window.id, to: active.wid, title: window.title)
+      if let record = appliedWindows[window.id] { appliedWindows[active.wid] = record }
+      appliedWindows.removeValue(forKey: window.id)
+      missingCounts.removeValue(forKey: window.id)
+      resolveCounts.removeValue(forKey: window.id)
+      targetElement = active.element
+      tiler_debug("Native tab raise adopt: wid \(window.id) -> \(active.wid)")
+    }
+
+    guard let element = targetElement else {
+      // The stored id is a dead/invisible tab and the active tab couldn't be adopted cleanly
+      // (transient mid tab-switch, or it's tracked elsewhere). Fall back to raising whatever
+      // on-screen window sits at this tile's frame so focus still lands on the group, then
+      // activate the app and reconcile to repair the tile id.
+      if let tileFrame = appliedWindows[window.id]?.frame,
+        let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
+      {
+        AXUIElementPerformAction(fallback, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(fallback, kAXMainAttribute as CFString, true as CFTypeRef)
+      }
+      if let app = NSRunningApplication(processIdentifier: window.pid) {
+        app.activate(options: [.activateIgnoringOtherApps])
+      }
+      setNeedsReconcile()
+      return
+    }
+
     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-    // Set as key window
     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
-
-    // Activate the app to ensure keyboard focus follows
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
     }
+  }
+
+  /// The currently-active tab window for a native tab group: the single on-screen
+  /// CGWindowList window matching `tileFrame` for `pid` (background tabs are absent from
+  /// the on-screen list). CGWindowList bounds are top-left origin; `tileFrame` is Cocoa
+  /// bottom-left, so convert before matching — the Y axis disambiguates vertically-stacked
+  /// same-pid windows. Adoption is intentionally conservative: it only returns a window
+  /// when EXACTLY ONE on-screen window matches the frame and that window is not already a
+  /// managed tile. Multiple matches (e.g. several same-app columns parked at the same
+  /// off-screen edge) are ambiguous, so we leave the tile unchanged rather than risk
+  /// adopting another tile's window.
+  private func currentActiveTab(pid: pid_t, tileFrame: NSRect, currentID: CGWindowID)
+    -> (wid: CGWindowID, element: AXUIElement)?
+  {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let screenHeight =
+      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    var matches: [CGWindowID] = []
+    for info in list {
+      guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+        let wid = info[kCGWindowNumber as String] as? CGWindowID,
+        let layer = info[kCGWindowLayer as String] as? Int, layer <= 0,
+        let b = info[kCGWindowBounds as String] as? [String: CGFloat]
+      else { continue }
+      let cocoaY = screenHeight - (b["Y"] ?? 0) - (b["Height"] ?? 0)
+      let cocoa = NSRect(
+        x: b["X"] ?? 0, y: cocoaY, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+      if framesMatch(cocoa, tileFrame, tolerance: 10) {
+        matches.append(wid)
+      }
+    }
+    // Only adopt on an unambiguous match to a window not owned by another tile.
+    guard matches.count == 1, let activeWid = matches.first,
+      activeWid != currentID, !isManaged(activeWid)
+    else { return nil }
+    guard
+      let element = windowStore.element(for: activeWid)
+        ?? windowStore.liveElement(forPID: pid, wid: activeWid)
+    else { return nil }
+    return (activeWid, element)
+  }
+
+  /// Best-effort: any on-screen window of `pid` physically located at `frame` (Cocoa
+  /// coords), resolved to an AX element. Unlike `currentActiveTab` this applies no
+  /// unique/unmanaged guard — it is only used to put focus on a group whose tile id has
+  /// gone stale and whose active tab couldn't be adopted cleanly, so raising the wrong
+  /// sibling is harmless (it's focus, not an id swap).
+  private func windowAtFrame(pid: pid_t, frame: NSRect) -> AXUIElement? {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let screenHeight =
+      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    for info in list {
+      guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+        let wid = info[kCGWindowNumber as String] as? CGWindowID,
+        let layer = info[kCGWindowLayer as String] as? Int, layer <= 0,
+        let b = info[kCGWindowBounds as String] as? [String: CGFloat]
+      else { continue }
+      let cocoaY = screenHeight - (b["Y"] ?? 0) - (b["Height"] ?? 0)
+      let cocoa = NSRect(
+        x: b["X"] ?? 0, y: cocoaY, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+      if framesMatch(cocoa, frame, tolerance: 10) {
+        return windowStore.element(for: wid) ?? windowStore.liveElement(forPID: pid, wid: wid)
+      }
+    }
+    return nil
   }
 
   // MARK: - Workspace-specific tiling
