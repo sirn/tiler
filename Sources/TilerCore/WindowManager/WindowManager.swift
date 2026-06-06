@@ -19,21 +19,21 @@ public class WindowManager {
   private var drainScheduled = false
 
   // Convergence model:
-  // Each retile bumps applyEpoch and records a desired frame per window in applyRecords.
+  // Each retile bumps applyEpoch and records a desired frame per window in appliedWindows.
   // Incoming AX geometry events are treated as echoes when they match the recorded frame,
   // otherwise as genuine user moves which trigger a debounced snap-back retile.
-  // A bounded corrector (correctionCounts) re-issues frames until they converge or are accepted;
-  // apps with minimum-size or character-cell-quantized windows will settle at their nearest
-  // achievable geometry rather than the exact requested frame.
+  // A bounded corrector re-issues frames until they converge or are accepted, tracking the
+  // attempt count in the corrections field; apps with minimum-size or character-cell-quantized
+  // windows will settle at their nearest achievable geometry rather than the exact requested frame.
   // Window reaping is debounced via missingCounts across reconcile cycles to tolerate transient
   // AX read misses where kAXWindowsAttribute briefly returns fewer windows than actually exist.
-  private struct ApplyRecord {
+  private struct AppliedWindow {
     var epoch: UInt64
     var frame: NSRect
+    var corrections: Int = 0
   }
   private var applyEpoch: UInt64 = 0
-  private var applyRecords: [CGWindowID: ApplyRecord] = [:]
-  private var correctionCounts: [CGWindowID: Int] = [:]
+  private var appliedWindows: [CGWindowID: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
 
@@ -210,7 +210,7 @@ public class WindowManager {
       let decision: EchoDecision
       if let observed = AXWindowBridge.currentFrame(for: element) {
         decision = classifyGeometryChange(
-          observed: observed, applied: applyRecords[wid]?.frame, tolerance: 2.0)
+          observed: observed, applied: appliedWindows[wid]?.frame, tolerance: 2.0)
       } else {
         decision = .genuineMove
       }
@@ -363,12 +363,12 @@ public class WindowManager {
       setNeedsRetile()
     }
 
-    // Prune applyRecords for windows no longer in state
+    // Prune appliedWindows for windows no longer in state
     let liveIDs = Set(
       state.screens.values.flatMap { $0.workspaces.values }.flatMap { $0.columns }.flatMap {
         $0.windows
       }.map { $0.id })
-    applyRecords = applyRecords.filter { liveIDs.contains($0.key) }
+    appliedWindows = appliedWindows.filter { liveIDs.contains($0.key) }
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
@@ -448,7 +448,7 @@ public class WindowManager {
 
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
-            applyRecords.removeValue(forKey: windowID)
+            appliedWindows.removeValue(forKey: windowID)
             tiler_log("Removed window \(windowID) from workspace \(wsID)")
             return
           }
@@ -468,7 +468,7 @@ public class WindowManager {
           workspace.columns[colIdx].windows.removeAll { $0.pid == pid }
           if workspace.columns[colIdx].windows.count < before {
             changed = true
-            for wid in removedWIDs { applyRecords.removeValue(forKey: wid) }
+            for wid in removedWIDs { appliedWindows.removeValue(forKey: wid) }
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -826,9 +826,8 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     applyEpoch &+= 1
-    correctionCounts.removeAll()
     for (wid, frame) in output.frames {
-      applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: frame)
+      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: frame)
     }
     AXWindowBridge.applyFrames(output.frames, store: windowStore)
     if !output.frames.isEmpty {
@@ -852,7 +851,7 @@ public class WindowManager {
           for window in column.windows {
             let wid = window.id
             // Idempotency: already parked if record's minX is left of the visible area
-            if let record = applyRecords[wid], record.frame.minX < visibleFrame.minX {
+            if let record = appliedWindows[wid], record.frame.minX < visibleFrame.minX {
               continue
             }
             guard let element = windowStore.element(for: wid) else { continue }
@@ -872,7 +871,7 @@ public class WindowManager {
     guard !frames.isEmpty else { return }
     // Record before applying so incoming AX events are treated as echoes
     for (wid, parked) in frames {
-      applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: parked)
+      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: parked)
     }
     AXWindowBridge.applyFrames(frames, store: windowStore)
     tiler_debug("Parked \(frames.count) windows from inactive workspaces")
@@ -894,9 +893,8 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     applyEpoch &+= 1
-    correctionCounts.removeAll()
     for (wid, frame) in output.frames {
-      applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: frame)
+      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: frame)
     }
     AXWindowBridge.applyFrames(output.frames, store: windowStore)
     if !output.frames.isEmpty {
@@ -917,15 +915,15 @@ public class WindowManager {
 
     let liveWIDs = Set(workspace.columns.flatMap { $0.windows }.map { $0.id })
 
-    for (wid, record) in applyRecords where record.epoch == applyEpoch && liveWIDs.contains(wid) {
+    for (wid, record) in appliedWindows where record.epoch == applyEpoch && liveWIDs.contains(wid) {
       guard let element = windowStore.element(for: wid) else { continue }
       guard let observed = AXWindowBridge.currentFrame(for: element) else { continue }
 
       if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
-        correctionCounts.removeValue(forKey: wid)
-      } else if correctionCounts[wid, default: 0] < 3 {
+        appliedWindows[wid]?.corrections = 0
+      } else if (appliedWindows[wid]?.corrections ?? 0) < 3 {
         AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
-        correctionCounts[wid, default: 0] += 1
+        appliedWindows[wid]?.corrections += 1
       } else {
         // Budget exhausted: the window won't reach the exact frame (min-size or
         // character-cell quantization). If it's wider than desired, absorb that into
@@ -935,7 +933,7 @@ public class WindowManager {
         if observed.width > record.frame.width + 2.0 {
           absorbMinWidth(wid: wid, observedWidth: observed.width)
         } else {
-          applyRecords[wid] = ApplyRecord(epoch: applyEpoch, frame: observed)
+          appliedWindows[wid]?.frame = observed
         }
       }
     }
