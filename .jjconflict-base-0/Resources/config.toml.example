@@ -35,6 +35,7 @@ count = 9
 #   focus_workspace <n>     move_to_workspace <n>
 #   increase_column_width   decrease_column_width
 #   toggle_column_tabbed    close_window        toggle_fullscreen
+#   consume_or_expel_left   consume_or_expel_right
 #
 # Modifier prefixes: ctrl, alt/option, cmd/command, shift
 # Key names: a-z, 0-9, f1-f12, space, return, tab, escape, comma, period,
@@ -113,6 +114,14 @@ action = "toggle_column_tabbed"
 [[keybind]]
 keys = "ctrl+alt+q"
 action = "close_window"
+
+[[keybind]]
+keys = "ctrl+alt+bracketleft"
+action = "consume_or_expel_left"
+
+[[keybind]]
+keys = "ctrl+alt+bracketright"
+action = "consume_or_expel_right"
 
 # App Rules
 # Per-application overrides. `app` is matched against the app bundle name
