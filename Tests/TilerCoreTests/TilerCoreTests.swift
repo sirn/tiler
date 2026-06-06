@@ -185,9 +185,6 @@ final class TilerCoreTests: XCTestCase {
   // whose right edge exceeds the usable area (no spill regardless of which column
   // is focused or what the starting offset is).
   func testLayoutNoWindowSpill() {
-    let win0 = WindowNode(id: 1, pid: 1, title: "w0")
-    let win1 = WindowNode(id: 2, pid: 1, title: "w1")
-    let win2 = WindowNode(id: 3, pid: 1, title: "w2")
     let ws = Workspace(
       id: 1,
       columns: [
@@ -372,8 +369,6 @@ final class TilerCoreTests: XCTestCase {
   // MARK: - consumeOrExpel tests
 
   func testConsumeLoneIntoLeft() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let cols = [
       Column(windows: [w1], focusedWindowIndex: 0),
       Column(windows: [w2], focusedWindowIndex: 0),
@@ -387,8 +382,6 @@ final class TilerCoreTests: XCTestCase {
   }
 
   func testExpelStackedToRight() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
     let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .right)
     XCTAssertNotNil(result)
@@ -399,8 +392,6 @@ final class TilerCoreTests: XCTestCase {
   }
 
   func testExpelStackedToLeft() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let cols = [Column(windows: [w1, w2], focusedWindowIndex: 1)]
     let result = consumeOrExpel(columns: cols, focusedColumnIndex: 0, direction: .left)
     XCTAssertNotNil(result)
@@ -411,8 +402,6 @@ final class TilerCoreTests: XCTestCase {
   }
 
   func testConsumeNoLeftNeighborIsNoop() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let cols = [
       Column(windows: [w1], focusedWindowIndex: 0),
       Column(windows: [w2], focusedWindowIndex: 0),
@@ -422,8 +411,6 @@ final class TilerCoreTests: XCTestCase {
   }
 
   func testConsumeNoRightNeighborIsNoop() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let cols = [
       Column(windows: [w1], focusedWindowIndex: 0),
       Column(windows: [w2], focusedWindowIndex: 0),
@@ -433,8 +420,6 @@ final class TilerCoreTests: XCTestCase {
   }
 
   func testRoundTripConsumeThenExpel() {
-    let w1 = WindowNode(id: 1, pid: 1, title: "w1")
-    let w2 = WindowNode(id: 2, pid: 1, title: "w2")
     let initial = [
       Column(windows: [w1], focusedWindowIndex: 0),
       Column(windows: [w2], focusedWindowIndex: 0),
