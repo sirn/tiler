@@ -2,32 +2,15 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-/// Snapshot for the menu bar workspace indicator.
-public struct WorkspaceIndicator: Equatable {
-  /// Workspace ids with at least one window (always including `current`), ascending.
-  public let occupied: [WorkspaceID]
-  /// The active workspace id.
-  public let current: WorkspaceID
-
-  public init(occupied: [WorkspaceID], current: WorkspaceID) {
-    self.occupied = occupied
-    self.current = current
-  }
-}
-
 /// Owns the tiling state and orchestrates the event→layout→apply pipeline.
 public class WindowManager {
   public var state: TilerState
   public var gaps: GapConfig
   public var workspaceCount: Int
   public var layoutConfig: LayoutConfig
-  public var appRules: [AppRuleConfig]
+
 
   public let windowStore = WindowStore()
-
-  /// Fired whenever the menu bar indicator state (occupied workspaces or current) changes.
-  public var onWorkspaceIndicatorChanged: ((WorkspaceIndicator) -> Void)?
-  private var lastIndicator: WorkspaceIndicator?
 
   private let eventBroker: EventBroker
 
@@ -72,7 +55,7 @@ public class WindowManager {
     )
     self.workspaceCount = config.workspaces.count
     self.layoutConfig = config.layout
-    self.appRules = config.appRules
+
     self.eventBroker = eventBroker
 
     eventBroker.onEvent = { [weak self] event in
@@ -118,29 +101,6 @@ public class WindowManager {
       reconcile()
     }
     reconcilePendingFrames()
-    emitWorkspaceIndicatorIfChanged()
-  }
-
-  /// Current indicator state for the active screen: workspaces with at least one window
-  /// (always including the active workspace), sorted ascending, plus the active workspace.
-  public func workspaceIndicator() -> WorkspaceIndicator? {
-    guard let screenID = activeScreenID(), let screenState = state.screens[screenID] else {
-      return nil
-    }
-    let current = screenState.activeWorkspaceID
-    var occupied = screenState.workspaces
-      .filter { _, ws in ws.columns.contains { !$0.windows.isEmpty } }
-      .map { $0.key }
-    if !occupied.contains(current) { occupied.append(current) }
-    occupied.sort()
-    return WorkspaceIndicator(occupied: occupied, current: current)
-  }
-
-  private func emitWorkspaceIndicatorIfChanged() {
-    guard let indicator = workspaceIndicator() else { return }
-    if indicator == lastIndicator { return }
-    lastIndicator = indicator
-    onWorkspaceIndicatorChanged?(indicator)
   }
 
   // MARK: - Screen & workspace setup
@@ -185,10 +145,10 @@ public class WindowManager {
       columnGaps: config.general.columnGaps
     )
     self.layoutConfig = config.layout
-    self.appRules = config.appRules
+
 
     let oldCount = workspaceCount
-    self.workspaceCount = config.workspaces.count
+    self.workspaceCount = max(1, config.workspaces.count)
 
     if oldCount != workspaceCount {
       for (screenID, var screenState) in state.screens {
@@ -287,8 +247,6 @@ public class WindowManager {
         .flatMap { $0.columns }
         .flatMap { $0.windows }
         .map { $0.pid })
-    windowStore.refresh(managedPIDs: managedPIDs)
-
     // Build tileable set from CGWindowList + WindowStore
     guard
       let windowList = CGWindowListCopyWindowInfo(
@@ -297,6 +255,8 @@ public class WindowManager {
       tiler_log("reconcile: Could not get window list")
       return
     }
+
+    windowStore.refresh(windowList: windowList, managedPIDs: managedPIDs)
 
     var tileableIDs: Set<CGWindowID> = []
     var unresolvedCandidates: Set<CGWindowID> = []
@@ -601,7 +561,7 @@ public class WindowManager {
 
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
-    tiler_log(
+    tiler_debug(
       "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
     )
   }
@@ -621,38 +581,8 @@ public class WindowManager {
     }
   }
 
-  private func removeWindow(windowID: CGWindowID) {
-    for (screenID, var screenState) in state.screens {
-      for (wsID, var workspace) in screenState.workspaces {
-        for (colIdx, var column) in workspace.columns.enumerated() {
-          if let removeIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
             let removedKey = column.windows[removeIdx].groupKey
-            column.windows.remove(at: removeIdx)
-
-            if column.windows.isEmpty {
-              workspace.columns.remove(at: colIdx)
-              if workspace.focusedColumnIndex >= workspace.columns.count
-                && !workspace.columns.isEmpty
-              {
-                workspace.focusedColumnIndex = workspace.columns.count - 1
-              }
-            } else {
-              if column.focusedWindowIndex >= column.windows.count {
-                column.focusedWindowIndex = column.windows.count - 1
-              }
-              workspace.columns[colIdx] = column
-            }
-
-            screenState.workspaces[wsID] = workspace
-            state.screens[screenID] = screenState
             appliedWindows.removeValue(forKey: removedKey)
-            tiler_log("Removed window \(windowID) from workspace \(wsID)")
-            return
-          }
-        }
-      }
-    }
-  }
 
   private func removeWindowsForPID(_ pid: pid_t) {
     for (screenID, var screenState) in state.screens {
@@ -999,10 +929,10 @@ public class WindowManager {
       let window = col.windows[col.focusedWindowIndex]
       guard let element = windowStore.element(for: window.id) else { return }
       var fullscreen: CFTypeRef?
-      let result = AXUIElementCopyAttributeValue(element, "AXFullscreen" as CFString, &fullscreen)
+      let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullscreen)
       if result == .success, let isFullscreen = fullscreen as? Bool {
         AXUIElementSetAttributeValue(
-          element, "AXFullscreen" as CFString, !isFullscreen as CFTypeRef)
+          element, "AXFullScreen" as CFString, !isFullscreen as CFTypeRef)
         tiler_log("Toggled fullscreen on window \(window.id)")
       }
 
@@ -1272,17 +1202,16 @@ public class WindowManager {
   }
 
   private func hideInactiveWorkspaces() {
-    guard let activeScr = activeScreenID(),
-      let activeWS = activeWorkspaceID()
+    guard activeScreenID() != nil, activeWorkspaceID() != nil
     else { return }
 
     var frames: [CGWindowID: NSRect] = [:]
 
-    for (screenID, screenState) in state.screens {
+    for (_, screenState) in state.screens {
       let visibleFrame = screenState.info.visibleFrame
       for (wsID, workspace) in screenState.workspaces {
-        // Only park windows that are NOT on the active workspace of the active screen
-        guard !(screenID == activeScr && wsID == activeWS) else { continue }
+        // Only park windows that are NOT on the active workspace of each screen
+        guard wsID != screenState.activeWorkspaceID else { continue }
         for column in workspace.columns {
           for window in column.windows {
             let wid = window.id
@@ -1368,8 +1297,6 @@ public class WindowManager {
       if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
         appliedWindows[gk]?.corrections = 0
       } else if (appliedWindows[gk]?.corrections ?? 0) < 3 {
-        tiler_debug(
-          "correct: wid=\(wid) re-issue attempt=\((appliedWindows[gk]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)")
         AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
         appliedWindows[gk]?.corrections += 1
       } else {
@@ -1378,8 +1305,6 @@ public class WindowManager {
         // the column width; otherwise accept its actual settled frame as the echo
         // reference so future geometry events at this position are treated as echoes
         // (prevents the snap-back path from looping on quantized windows).
-        tiler_debug(
-          "correct: wid=\(wid) gave up after 3 tries — observed=\(observed) intended=\(record.frame)")
         if observed.width > record.frame.width + 2.0 {
           absorbMinWidth(wid: wid, observedWidth: observed.width)
         } else {

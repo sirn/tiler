@@ -3,7 +3,7 @@ import ApplicationServices
 import CoreGraphics
 
 /// Owns the CGWindowID ↔ AXUIElement identity map, refreshed from CGWindowList.
-/// Uses `_AXUIElementGetWindow` for exact identity, with position-based fallback when that fails.
+/// Uses `axGetWindowID` for exact identity, with position-based fallback when that fails.
 public final class WindowStore {
   private var elements: [CGWindowID: AXUIElement] = [:]
   private var pidWindows: [pid_t: Set<CGWindowID>] = [:]
@@ -11,15 +11,15 @@ public final class WindowStore {
   /// Rebuild the identity map from CGWindowList + AX, with position-based fallback.
   /// managedPIDs is unioned with the on-screen CGWindowList pids so that parked managed
   /// windows (off the current CGWindowList) are still resolved via AX identity.
-  public func refresh(managedPIDs: Set<pid_t> = []) {
-    elements.removeAll(keepingCapacity: true)
-    pidWindows.removeAll(keepingCapacity: true)
-    guard
-      let windowInfo = CGWindowListCopyWindowInfo(
+  public func refresh(windowList: [[String: Any]]? = nil, managedPIDs: Set<pid_t> = []) {
+    guard let windowInfo = windowList
+      ?? CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
     else {
       return
     }
+    elements.removeAll(keepingCapacity: true)
+    pidWindows.removeAll(keepingCapacity: true)
 
     // First pass: build CGWindowList info indexed by PID for fallback matching
     var cgWindowsByPID: [pid_t: [(wid: CGWindowID, bounds: NSRect, title: String)]] = [:]
@@ -105,15 +105,12 @@ public final class WindowStore {
       // while a window is mid-move, causing frames to be applied to the wrong element.
       let allowPositionFallback = axWindows.count <= 1
 
-      // For each AX window, try _AXUIElementGetWindow first, then position fallback.
-      // _AXUIElementGetWindow is a private SPI that maps an AXUIElement directly to its
-      // CGWindowID; it is the only reliable per-window identity primitive available on macOS.
+      // For each AX window, try axGetWindowID first, then position fallback.
+      // axGetWindowID resolves the private SPI at runtime so the app doesn't crash
+      // if Apple removes the symbol.
       for axWindow in axWindows {
-        var foundWid: CGWindowID = 0
-        let err = _AXUIElementGetWindow(axWindow, &foundWid)
-
-        if err == .success, foundWid != 0 {
-          // Exact match via private API
+        if let foundWid = axGetWindowID(axWindow) {
+          // Exact match via runtime-resolved private API
           elements[foundWid] = axWindow
           pidWindows[pid, default: []].insert(foundWid)
           matchedCG.insert(foundWid)
@@ -158,7 +155,7 @@ public final class WindowStore {
           }
         }
         // When allowPositionFallback is false and exact id lookup failed, skip this
-        // window — it will be picked up once _AXUIElementGetWindow succeeds
+        // window — it will be picked up once axGetWindowID succeeds
       }
 
       // Secondary fallback: only for single-window apps where the primary pass missed
@@ -210,16 +207,27 @@ public final class WindowStore {
     return elements[id]
   }
 
-  /// Get the CGWindowID for an AXUIElement via _AXUIElementGetWindow.
-  public func windowID(for element: AXUIElement) -> CGWindowID? {
-    var wid: CGWindowID = 0
-    let err = _AXUIElementGetWindow(element, &wid)
-    return err == .success ? wid : nil
+  /// Resolve the AXUIElement for a specific (pid, wid) by scanning the app's current AX
+  /// windows. Used when the cached map may be stale, e.g. just after a native tab switch.
+  public func liveElement(forPID pid: pid_t, wid: CGWindowID) -> AXUIElement? {
+    let appElement = AXUIElementCreateApplication(pid)
+    var windowsRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        == .success,
+      let axWindows = windowsRef as? [AXUIElement]
+    else { return nil }
+    for axWindow in axWindows {
+      if axGetWindowID(axWindow) == wid {
+        return axWindow
+      }
+    }
+    return nil
   }
 
-  /// Get all CGWindowIDs for a given PID.
-  public func windowIDs(forPID pid: pid_t) -> [CGWindowID] {
-    return pidWindows[pid].map { Array($0) } ?? []
+  /// Get the CGWindowID for an AXUIElement via axGetWindowID.
+  public func windowID(for element: AXUIElement) -> CGWindowID? {
+    return axGetWindowID(element)
   }
 
   /// Remove all state for a terminated PID.

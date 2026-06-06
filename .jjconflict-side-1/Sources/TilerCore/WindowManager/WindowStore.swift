@@ -218,8 +218,7 @@ public final class WindowStore {
       let axWindows = windowsRef as? [AXUIElement]
     else { return nil }
     for axWindow in axWindows {
-      var w: CGWindowID = 0
-      if _AXUIElementGetWindow(axWindow, &w) == .success, w == wid {
+      if axGetWindowID(axWindow) == wid {
         return axWindow
       }
     }
