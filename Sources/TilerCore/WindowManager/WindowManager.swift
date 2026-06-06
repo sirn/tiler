@@ -206,19 +206,24 @@ public class WindowManager {
       handleFocusChanged(pid: pid, element: element)
     case .geometryChanged(_, let element):
       guard let wid = windowStore.windowID(for: element) else { return }
-      // If the observed frame matches what we applied, it's an echo — ignore it
-      if let record = applyRecords[wid],
-        let observed = AXWindowBridge.currentFrame(for: element),
-        AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0)
-      {
-        return
+      let decision: EchoDecision
+      if let observed = AXWindowBridge.currentFrame(for: element) {
+        decision = classifyGeometryChange(
+          observed: observed, applied: applyRecords[wid]?.frame, tolerance: 2.0)
+      } else {
+        decision = .genuineMove
       }
-      // Genuine user move/resize — debounce so snap-back fires after the user releases
-      moveSettleToken &+= 1
-      let token = moveSettleToken
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-        guard let self = self, self.moveSettleToken == token else { return }
-        self.setNeedsRetile()
+      switch decision {
+      case .echo:
+        return
+      case .genuineMove:
+        // Genuine user move/resize — debounce so snap-back fires after the user releases
+        moveSettleToken &+= 1
+        let token = moveSettleToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+          guard let self = self, self.moveSettleToken == token else { return }
+          self.setNeedsRetile()
+        }
       }
     }
   }
@@ -303,22 +308,13 @@ public class WindowManager {
         .flatMap { $0.windows }
         .map { $0.id })
 
-    // Debounced reaping: a window must be missing across two consecutive reconciles before
-    // it is removed. This guards against transient AX read misses under load where
-    // kAXWindowsAttribute briefly returns fewer windows than actually exist.
-    var toReap: Set<CGWindowID> = []
-    for id in managedIDs {
-      if stillAlive.contains(id) {
-        missingCounts[id] = 0
-      } else {
-        missingCounts[id, default: 0] += 1
-        if missingCounts[id]! >= 2 {
-          toReap.insert(id)
-        }
-      }
-    }
-    // Prune entries for ids no longer in state (already removed in a prior reconcile).
-    missingCounts = missingCounts.filter { managedIDs.contains($0.key) }
+    let plan = reconcilePlan(
+      managedIDs: managedIDs,
+      stillAliveIDs: stillAlive,
+      tileableIDs: tileableIDs,
+      missingCounts: missingCounts,
+      missThreshold: 2)
+    missingCounts = plan.updatedMissingCounts
 
     // Remove windows that have been consistently missing (destroyed, minimized, fullscreen).
     // Off-screen-parked windows remain in stillAlive and are preserved.
@@ -328,7 +324,7 @@ public class WindowManager {
         var changed = false
         for colIdx in workspace.columns.indices.reversed() {
           let before = workspace.columns[colIdx].windows.count
-          workspace.columns[colIdx].windows.removeAll { toReap.contains($0.id) }
+          workspace.columns[colIdx].windows.removeAll { plan.toReap.contains($0.id) }
           if workspace.columns[colIdx].windows.count < before {
             changed = true
             membershipChanged = true
@@ -351,18 +347,12 @@ public class WindowManager {
 
     // If any window is on its first miss (not yet reaped), schedule another reconcile so
     // a genuinely-closed window gets its second strike promptly.
-    let hasPendingMiss = missingCounts.values.contains { $0 == 1 }
-    if hasPendingMiss {
+    if plan.hasPendingMiss {
       setNeedsReconcile()
     }
 
     // Add new windows
-    let existingIDs = Set(
-      state.screens.values.flatMap {
-        $0.workspaces.values.flatMap { $0.columns.flatMap { $0.windows.map { $0.id } } }
-      })
-    for wid in tileableIDs {
-      guard !existingIDs.contains(wid) else { continue }
+    for wid in plan.toAdd {
       guard let (pid, title) = windowInfo[wid] else { continue }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title)
       membershipChanged = true
