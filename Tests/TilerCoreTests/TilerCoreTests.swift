@@ -287,7 +287,8 @@ final class TilerCoreTests: XCTestCase {
   func testAddNewWindow() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [1], tileableIDs: [1, 2],
-      missingCounts: [:], missThreshold: 2)
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertEqual(plan.toAdd, [2])
     XCTAssertEqual(plan.toReap, [])
   }
@@ -295,7 +296,8 @@ final class TilerCoreTests: XCTestCase {
   func testReapAfterTwoMisses() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [], tileableIDs: [],
-      missingCounts: [1: 1], missThreshold: 2)
+      missingCounts: [1: 1], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertEqual(plan.toReap, [1])
     XCTAssertEqual(plan.updatedMissingCounts[1], 2)
   }
@@ -303,7 +305,8 @@ final class TilerCoreTests: XCTestCase {
   func testTransientMissNotReaped() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [], tileableIDs: [],
-      missingCounts: [:], missThreshold: 2)
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertEqual(plan.toReap, [])
     XCTAssertEqual(plan.updatedMissingCounts[1], 1)
     XCTAssertTrue(plan.hasPendingMiss)
@@ -312,7 +315,8 @@ final class TilerCoreTests: XCTestCase {
   func testReappearResetsMissCount() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [1], tileableIDs: [1],
-      missingCounts: [1: 1], missThreshold: 2)
+      missingCounts: [1: 1], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertEqual(plan.updatedMissingCounts[1], 0)
     XCTAssertEqual(plan.toReap, [])
     XCTAssertFalse(plan.hasPendingMiss)
@@ -321,7 +325,8 @@ final class TilerCoreTests: XCTestCase {
   func testOffscreenParkedNotReapedIfStillTileable() {
     let plan = reconcilePlan(
       managedIDs: [1], stillAliveIDs: [1], tileableIDs: [],
-      missingCounts: [:], missThreshold: 2)
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertEqual(plan.toReap, [])
     XCTAssertEqual(plan.toAdd, [])
   }
@@ -329,8 +334,51 @@ final class TilerCoreTests: XCTestCase {
   func testMissingCountsPrunedForRemovedIds() {
     let plan = reconcilePlan(
       managedIDs: [], stillAliveIDs: [], tileableIDs: [],
-      missingCounts: [9: 1], missThreshold: 2)
+      missingCounts: [9: 1], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
     XCTAssertNil(plan.updatedMissingCounts[9])
+  }
+
+  // MARK: - reconcilePlan resolve-retry tests
+
+  func testUnresolvedIdIncrementsCountAndSetsPendingResolve() {
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [42], resolveCounts: [:], resolveThreshold: 8)
+    XCTAssertEqual(plan.updatedResolveCounts[42], 1)
+    XCTAssertTrue(plan.hasPendingResolve)
+  }
+
+  func testUnresolvedIdAtThresholdStopsPendingResolve() {
+    // count reaches resolveThreshold on this pass (7 + 1 = 8 >= 8)
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [42], resolveCounts: [42: 7], resolveThreshold: 8)
+    XCTAssertEqual(plan.updatedResolveCounts[42], 8)
+    XCTAssertFalse(plan.hasPendingResolve)
+  }
+
+  func testResolvedIdDropsFromResolveCounts() {
+    // id 42 was previously unresolved but is absent from unresolvedIDs this pass
+    let plan = reconcilePlan(
+      managedIDs: [], stillAliveIDs: [], tileableIDs: [],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [42: 3], resolveThreshold: 8)
+    XCTAssertNil(plan.updatedResolveCounts[42])
+    XCTAssertFalse(plan.hasPendingResolve)
+  }
+
+  func testExistingToAddBehaviorUnaffectedWithEmptyResolveParams() {
+    let plan = reconcilePlan(
+      managedIDs: [1], stillAliveIDs: [1], tileableIDs: [1, 2],
+      missingCounts: [:], missThreshold: 2,
+      unresolvedIDs: [], resolveCounts: [:], resolveThreshold: 8)
+    XCTAssertEqual(plan.toAdd, [2])
+    XCTAssertEqual(plan.toReap, [])
+    XCTAssertFalse(plan.hasPendingResolve)
+    XCTAssertTrue(plan.updatedResolveCounts.isEmpty)
   }
 
   // MARK: - consumeOrExpel tests
