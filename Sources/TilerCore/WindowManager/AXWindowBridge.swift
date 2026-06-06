@@ -13,12 +13,13 @@ public enum AXWindowBridge {
   /// Apply frames to multiple windows at once, using a WindowStore for element lookup.
   /// Issues each frame once (pos→size→pos); convergence is managed by the caller's corrector.
   public static func applyFrames(_ frames: [CGWindowID: NSRect], store: WindowStore) {
-    // TODO: multi-display — screenHeight is sourced from the primary screen only
+    // The Cocoa↔AX y-flip uses the primary screen height only; this is single-display-correct
+    // but will produce wrong coordinates on secondary screens. TODO: multi-display support.
     let screenHeight =
       NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
 
     // Apply pos→size→pos: macOS clamps a window's position based on its current size,
-    // so setting position after resize corrects any clamping that occurred during resize.
+    // so position is reapplied after the resize to correct any clamping that occurred.
     func applyOne(_ element: AXUIElement, _ frame: NSRect) {
       var pos = CGPoint(x: frame.minX, y: screenHeight - frame.maxY)
       var size = frame.size
@@ -93,7 +94,7 @@ public enum AXWindowBridge {
 
   /// Read the current AX frame for an element using the primary screen height.
   static func currentFrame(for element: AXUIElement) -> NSRect? {
-    // TODO: multi-display — screenHeight is sourced from the primary screen only
+    // Same primary-screen y-flip limitation as applyFrames. TODO: multi-display support.
     let screenHeight =
       NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
     return getAXFrame(element, screenHeight: screenHeight)

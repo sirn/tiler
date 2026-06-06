@@ -105,7 +105,9 @@ public final class WindowStore {
       // while a window is mid-move, causing frames to be applied to the wrong element.
       let allowPositionFallback = axWindows.count <= 1
 
-      // For each AX window, try _AXUIElementGetWindow first, then position fallback
+      // For each AX window, try _AXUIElementGetWindow first, then position fallback.
+      // _AXUIElementGetWindow is a private SPI that maps an AXUIElement directly to its
+      // CGWindowID; it is the only reliable per-window identity primitive available on macOS.
       for axWindow in axWindows {
         var foundWid: CGWindowID = 0
         let err = _AXUIElementGetWindow(axWindow, &foundWid)

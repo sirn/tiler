@@ -18,7 +18,15 @@ public class WindowManager {
   private var needsRetile = false
   private var drainScheduled = false
 
-  // Epoch-based echo suppression: each retile bumps the epoch and records desired frames
+  // Convergence model:
+  // Each retile bumps applyEpoch and records a desired frame per window in applyRecords.
+  // Incoming AX geometry events are treated as echoes when they match the recorded frame,
+  // otherwise as genuine user moves which trigger a debounced snap-back retile.
+  // A bounded corrector (correctionCounts) re-issues frames until they converge or are accepted;
+  // apps with minimum-size or character-cell-quantized windows will settle at their nearest
+  // achievable geometry rather than the exact requested frame.
+  // Window reaping is debounced via missingCounts across reconcile cycles to tolerate transient
+  // AX read misses where kAXWindowsAttribute briefly returns fewer windows than actually exist.
   private struct ApplyRecord {
     var epoch: UInt64
     var frame: NSRect
