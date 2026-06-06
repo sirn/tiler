@@ -16,6 +16,8 @@ public enum Action: Equatable {
   case toggleColumnTabbed
   case closeWindow
   case toggleFullscreen
+  case consumeOrExpelLeft
+  case consumeOrExpelRight
 
   /// Parse an action string with optional arguments.
   /// e.g. "focus_workspace" with args ["3"] → .focusWorkspace(3)
@@ -40,6 +42,8 @@ public enum Action: Equatable {
     case "toggle_column_tabbed": return .toggleColumnTabbed
     case "close_window": return .closeWindow
     case "toggle_fullscreen": return .toggleFullscreen
+    case "consume_or_expel_left": return .consumeOrExpelLeft
+    case "consume_or_expel_right": return .consumeOrExpelRight
     default: return nil
     }
   }
