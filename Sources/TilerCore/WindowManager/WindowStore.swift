@@ -217,6 +217,13 @@ public final class WindowStore {
     return err == .success ? wid : nil
   }
 
+  /// Register a single element↔WID mapping, used when an inline tab swap
+  /// backfills a focus event before the next reconcile runs.
+  public func register(id: CGWindowID, pid: pid_t, element: AXUIElement) {
+    elements[id] = element
+    pidWindows[pid, default: []].insert(id)
+  }
+
   /// Get all CGWindowIDs for a given PID.
   public func windowIDs(forPID pid: pid_t) -> [CGWindowID] {
     return pidWindows[pid].map { Array($0) } ?? []

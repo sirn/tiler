@@ -35,6 +35,7 @@ public class WindowManager {
   private var applyEpoch: UInt64 = 0
   private var appliedWindows: [CGWindowID: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
+  private var focusToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
   private var resolveRetryToken: UInt64 = 0
@@ -480,8 +481,66 @@ public class WindowManager {
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-    guard let wid = windowStore.windowID(for: element) else { return }
-    updateFocus(windowID: wid)
+    tiler_log("handleFocusChanged: pid=\(pid)")
+    guard let wid = windowStore.windowID(for: element) else {
+      tiler_log("handleFocusChanged: could not get windowID for element")
+      return
+    }
+
+    // Fast path: WID is already managed.
+    let managedIDs = Set(
+      state.screens.values
+        .flatMap { $0.workspaces.values }
+        .flatMap { $0.columns }
+        .flatMap { $0.windows }
+        .map { $0.id })
+    if managedIDs.contains(wid) {
+      updateFocus(windowID: wid)
+      return
+    }
+
+    // Slow path: unknown WID — native tab switch replaced the active CGWindow
+    // without firing kAXWindowCreatedNotification. Backfill synchronously.
+    guard let newFrame = AXWindowBridge.currentFrame(for: element) else {
+      tiler_log("handleFocusChanged: could not get currentFrame")
+      return
+    }
+    guard let screenID = activeScreenID() else {
+      tiler_log("handleFocusChanged: no activeScreenID")
+      return
+    }
+    guard let wsID = activeWorkspaceID() else {
+      tiler_log("handleFocusChanged: no activeWorkspaceID")
+      return
+    }
+    guard let workspace = state.screens[screenID]?.workspaces[wsID] else {
+      tiler_log("handleFocusChanged: no workspace for screen=\(screenID) ws=\(wsID)")
+      return
+    }
+
+    for col in workspace.columns {
+      for win in col.windows where win.pid == pid {
+        guard let applied = appliedWindows[win.id] else { continue }
+        guard abs(newFrame.minX - applied.frame.minX) < 10 else { continue }
+
+        var titleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+        let title = titleRef as? String ?? ""
+
+        let oldID = win.id
+        swapWindowID(from: oldID, to: wid, title: title)
+        if let record = appliedWindows[oldID] {
+          appliedWindows[wid] = record
+        }
+        appliedWindows.removeValue(forKey: oldID)
+        missingCounts.removeValue(forKey: oldID)
+        resolveCounts.removeValue(forKey: oldID)
+        windowStore.register(id: wid, pid: pid, element: element)
+        updateFocus(windowID: wid)
+        tiler_log("FocusTabSwap: \(oldID) → \(wid)")
+        return
+      }
+    }
   }
 
   // MARK: - State mutations
@@ -946,14 +1005,21 @@ public class WindowManager {
     let window = col.windows[col.focusedWindowIndex]
     guard let element = windowStore.element(for: window.id) else { return }
 
-    // Raise the window
     AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-    // Set as key window
     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
 
-    // Activate the app to ensure keyboard focus follows
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
+    }
+
+    // Apps like Ghostty restore their internal last-active tab on activation.
+    // Re-raising after a short delay overrides that once activation completes.
+    focusToken &+= 1
+    let token = focusToken
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+      guard let self, self.focusToken == token else { return }
+      AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+      AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
     }
   }
 
