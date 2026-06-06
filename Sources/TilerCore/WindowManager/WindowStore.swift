@@ -230,4 +230,10 @@ public final class WindowStore {
     }
     pidWindows.removeValue(forKey: pid)
   }
+
+  /// Register a window ID with its PID and AXUIElement in the identity map.
+  public func register(id: CGWindowID, pid: pid_t, element: AXUIElement) {
+    elements[id] = element
+    pidWindows[pid, default: []].insert(id)
+  }
 }

@@ -481,6 +481,7 @@ public class WindowManager {
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     guard let wid = windowStore.windowID(for: element) else { return }
+    windowStore.register(id: wid, pid: pid, element: element)
     updateFocus(windowID: wid)
   }
 
