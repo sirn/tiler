@@ -77,6 +77,9 @@ public enum LayoutEngine {
       // A column whose strip left edge is before the viewport has scrolled off to the left;
       // otherwise it is off to the right. Leave exactly 1px on-screen so macOS honors
       // the position without clamping it to a ~40px sliver.
+      // macOS AX clamps any window positioned so it would be fully off-screen, snapping it
+      // back to roughly a 40px sliver. Leaving ≥1px visible is honored. This behavior is
+      // empirically measured and undocumented — it may change across macOS versions.
       let offLeft = colGeom.left < roundedOffset
       let hiddenX = round(offLeft ? (screenMinX - colWidth + 1) : (screenMaxX - 1))
 
