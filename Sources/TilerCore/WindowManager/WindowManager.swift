@@ -610,15 +610,11 @@ public class WindowManager {
   private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
     for (screenID, var screenState) in state.screens {
       for (wsID, var workspace) in screenState.workspaces {
-        for (colIdx, var column) in workspace.columns.enumerated() {
-          if let winIdx = column.windows.firstIndex(where: { $0.id == oldID }) {
-            let existing = column.windows[winIdx]
-            column.windows[winIdx] = WindowNode(id: newID, groupKey: existing.groupKey, pid: existing.pid, title: title)
-            workspace.columns[colIdx] = column
-            screenState.workspaces[wsID] = workspace
-            state.screens[screenID] = screenState
-            return
-          }
+        if let newColumns = swapBackingID(in: workspace.columns, from: oldID, to: newID, title: title) {
+          workspace.columns = newColumns
+          screenState.workspaces[wsID] = workspace
+          state.screens[screenID] = screenState
+          return
         }
       }
     }
