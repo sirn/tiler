@@ -64,9 +64,6 @@ public class AppObserver {
 
   private var externalCallback: EventCallback?
 
-  public func setCallback(_ cb: @escaping EventCallback) {
-    self.externalCallback = cb
-  }
 
   private func handleEvent(observer: AXObserver, element: AXUIElement, notification: CFString) {
     externalCallback?(observer, element, notification)
