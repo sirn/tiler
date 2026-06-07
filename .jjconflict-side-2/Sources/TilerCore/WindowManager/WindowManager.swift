@@ -1,7 +1,6 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
-import CSkyLight
 
 /// Snapshot for the menu bar workspace indicator.
 public struct WorkspaceIndicator: Equatable {
@@ -52,7 +51,6 @@ public class WindowManager {
     var corrections: Int = 0
   }
   private var applyEpoch: UInt64 = 0
-  private var lastFocusedWid: CGWindowID = 0
   private var nextGroupToken: UInt64 = 0
   private func mintGroupKey() -> GroupKey {
     nextGroupToken &+= 1
@@ -1128,20 +1126,13 @@ public class WindowManager {
       return
     }
 
-    // Prefer SkyLight force-focus: it moves keyboard focus (and selects a native tab)
-    // even when AXRaise cannot. Fall back to AX raise + activate if it's unavailable.
-    if tiler_focus_window(window.pid, raisedWid, lastFocusedWid) {
-      lastFocusedWid = raisedWid
-      tiler_debug("focus: skylight focus wid=\(raisedWid) pid=\(window.pid)")
-    } else {
-      AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-      AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
-      if let app = NSRunningApplication(processIdentifier: window.pid) {
-        app.activate(options: [.activateIgnoringOtherApps])
-      }
-      lastFocusedWid = raisedWid
-      tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
+    // Move keyboard focus to the tile: raise it, mark it main, and activate the app.
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    if let app = NSRunningApplication(processIdentifier: window.pid) {
+      app.activate(options: [.activateIgnoringOtherApps])
     }
+    tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
 
     // If we raised the stored tile without adopting an active tab, and that tile is absent
     // from the on-screen CGWindowList while we expect it visible (its applied frame
