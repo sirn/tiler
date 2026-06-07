@@ -18,7 +18,7 @@ public struct KeyCombo: Equatable, Hashable {
   /// Parse a string like "ctrl+alt+h" or "cmd+shift+1" into a KeyCombo.
   /// Returns nil if the string can't be parsed.
   public static func parse(_ string: String) -> KeyCombo? {
-    let parts = string.lowercased().split(separator: "+").map(String.init)
+    let parts = string.lowercased().split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces) }
     guard let keyPart = parts.last else { return nil }
 
     var flags: CGEventFlags = []
