@@ -1368,6 +1368,8 @@ public class WindowManager {
       if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
         appliedWindows[gk]?.corrections = 0
       } else if (appliedWindows[gk]?.corrections ?? 0) < 3 {
+        tiler_debug(
+          "correct: wid=\(wid) re-issue attempt=\((appliedWindows[gk]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)")
         AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
         appliedWindows[gk]?.corrections += 1
       } else {
@@ -1376,6 +1378,8 @@ public class WindowManager {
         // the column width; otherwise accept its actual settled frame as the echo
         // reference so future geometry events at this position are treated as echoes
         // (prevents the snap-back path from looping on quantized windows).
+        tiler_debug(
+          "correct: wid=\(wid) gave up after 3 tries — observed=\(observed) intended=\(record.frame)")
         if observed.width > record.frame.width + 2.0 {
           absorbMinWidth(wid: wid, observedWidth: observed.width)
         } else {
