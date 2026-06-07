@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public enum HorizontalDirection {
   case left
@@ -46,4 +47,22 @@ public func consumeOrExpel(
     cols[adjustedTarget].measuredMinWidth = nil
     return ConsumeOrExpelResult(columns: cols, focusedColumnIndex: adjustedTarget)
   }
+}
+
+/// Replace a tile's backing CGWindowID in place, preserving its stable `groupKey` and pid
+/// (only the id and title change). Returns the updated columns, or nil if no tile has `oldID`.
+/// Pure: used by WindowManager.swapWindowID so the identity-preservation invariant is testable.
+public func swapBackingID(
+  in columns: [Column], from oldID: CGWindowID, to newID: CGWindowID, title: String
+) -> [Column]? {
+  for (colIdx, column) in columns.enumerated() {
+    if let winIdx = column.windows.firstIndex(where: { $0.id == oldID }) {
+      var result = columns
+      let existing = column.windows[winIdx]
+      result[colIdx].windows[winIdx] = WindowNode(
+        id: newID, groupKey: existing.groupKey, pid: existing.pid, title: title)
+      return result
+    }
+  }
+  return nil
 }
