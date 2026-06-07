@@ -60,16 +60,13 @@ public struct GeneralConfig: Codable {
 /// [layout] section — default column behaviour.
 public struct LayoutConfig: Codable {
   public var defaultColumnWidth: CGFloat
-  public var centerFocusedColumn: Bool
 
-  public init(defaultColumnWidth: CGFloat = 0.5, centerFocusedColumn: Bool = true) {
+  public init(defaultColumnWidth: CGFloat = 0.5) {
     self.defaultColumnWidth = defaultColumnWidth
-    self.centerFocusedColumn = centerFocusedColumn
   }
 
   enum CodingKeys: String, CodingKey {
     case defaultColumnWidth = "default_column_width"
-    case centerFocusedColumn = "center_focused_column"
   }
 }
 
