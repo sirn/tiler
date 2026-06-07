@@ -1056,24 +1056,26 @@ public class WindowManager {
       // (transient mid tab-switch, or it's tracked elsewhere). Fall back to raising whatever
       // on-screen window sits at this tile's frame so focus still lands on the group, then
       // activate the app and reconcile to repair the tile id.
+      if let app = NSRunningApplication(processIdentifier: window.pid) {
+        app.activate(options: [.activateIgnoringOtherApps])
+      }
       if let tileFrame = appliedWindows[window.id]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
       {
-        AXUIElementPerformAction(fallback, kAXRaiseAction as CFString)
         AXUIElementSetAttributeValue(fallback, kAXMainAttribute as CFString, true as CFTypeRef)
-      }
-      if let app = NSRunningApplication(processIdentifier: window.pid) {
-        app.activate(options: [.activateIgnoringOtherApps])
+        AXUIElementPerformAction(fallback, kAXRaiseAction as CFString)
       }
       setNeedsReconcile()
       return
     }
 
-    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    // Activate the app first so bringing it to the front does not re-focus its previous
+    // main window; then make this window main and raise it last so it ends up key.
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
     }
+    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     tiler_debug(
       "focus: raised wid=\(window.id) pid=\(window.pid) appFound=\(NSRunningApplication(processIdentifier: window.pid) != nil)")
 
