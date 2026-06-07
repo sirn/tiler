@@ -5,8 +5,8 @@ import Darwin
 public enum TilerEvent {
   case appLaunched(pid_t)
   case appTerminated(pid_t)
-  case windowCreated
-  case windowDestroyed
+  case windowCreated(AXUIElement)
+  case windowDestroyed(AXUIElement)
   case windowMinimized
   case windowDeminimized
   case focusChanged(pid_t, AXUIElement)
@@ -87,9 +87,9 @@ public class EventBroker {
       if notifStr == kAXFocusedWindowChangedNotification as String {
         self.onEvent?(.focusChanged(pid, element))
       } else if notifStr == kAXWindowCreatedNotification as String {
-        self.onEvent?(.windowCreated)
+        self.onEvent?(.windowCreated(element))
       } else if notifStr == kAXUIElementDestroyedNotification as String {
-        self.onEvent?(.windowDestroyed)
+        self.onEvent?(.windowDestroyed(element))
       } else if notifStr == kAXWindowMiniaturizedNotification as String {
         self.onEvent?(.windowMinimized)
       } else if notifStr == kAXWindowDeminiaturizedNotification as String {
