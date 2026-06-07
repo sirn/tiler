@@ -62,6 +62,7 @@ public class WindowManager {
   private var resolveCounts: [CGWindowID: Int] = [:]
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
+  private var focusActivateToken: UInt64 = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -1109,6 +1110,7 @@ public class WindowManager {
       // activate the app and reconcile to repair the tile id.
       if let app = NSRunningApplication(processIdentifier: window.pid) {
         app.activate(options: [.activateIgnoringOtherApps])
+        verifyActivation(app: app)
       }
       if let tileFrame = appliedWindows[window.groupKey]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
@@ -1128,6 +1130,7 @@ public class WindowManager {
     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
+      verifyActivation(app: app)
     }
     tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
 
@@ -1148,6 +1151,36 @@ public class WindowManager {
         if let sid = activeScreenID(), let wid = activeWorkspaceID() {
           scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
         }
+      }
+    }
+  }
+
+  /// After activating an app, verify that focus actually transferred and retry if needed.
+  /// macOS does not guarantee that `app.activate()` will immediately transfer keyboard focus,
+  /// especially when another app holds an active CGEventTap (e.g., Ghostty). This polls the
+  /// frontmost application and retries activation up to 3 times with 100ms gaps.
+  private func verifyActivation(app: NSRunningApplication) {
+    focusActivateToken &+= 1
+    let token = focusActivateToken
+    tiler_debug("focus: scheduling activation verification for pid=\(app.processIdentifier)")
+    scheduleActivationVerify(app: app, token: token, retries: 0, maxRetries: 3)
+  }
+
+  private func scheduleActivationVerify(app: NSRunningApplication, token: UInt64, retries: Int, maxRetries: Int) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      guard let self = self, self.focusActivateToken == token else { return }
+
+      if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+        tiler_debug("focus: activation verified for pid=\(app.processIdentifier)")
+        return
+      }
+
+      if retries < maxRetries {
+        tiler_debug("focus: activation retry \(retries + 1)/\(maxRetries) for pid=\(app.processIdentifier)")
+        app.activate(options: [.activateIgnoringOtherApps])
+        self.scheduleActivationVerify(app: app, token: token, retries: retries + 1, maxRetries: maxRetries)
+      } else {
+        tiler_debug("focus: activation failed after \(maxRetries) retries for pid=\(app.processIdentifier)")
       }
     }
   }
