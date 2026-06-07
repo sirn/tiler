@@ -620,36 +620,6 @@ public class WindowManager {
     }
   }
 
-  private func removeWindow(windowID: CGWindowID) {
-    for (screenID, var screenState) in state.screens {
-      for (wsID, var workspace) in screenState.workspaces {
-        for (colIdx, var column) in workspace.columns.enumerated() {
-          if let removeIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
-            column.windows.remove(at: removeIdx)
-
-            if column.windows.isEmpty {
-              workspace.columns.remove(at: colIdx)
-              if workspace.focusedColumnIndex >= workspace.columns.count
-                && !workspace.columns.isEmpty
-              {
-                workspace.focusedColumnIndex = workspace.columns.count - 1
-              }
-            } else {
-              if column.focusedWindowIndex >= column.windows.count {
-                column.focusedWindowIndex = column.windows.count - 1
-              }
-              workspace.columns[colIdx] = column
-            }
-
-            screenState.workspaces[wsID] = workspace
-            state.screens[screenID] = screenState
-            tiler_log("Removed window \(windowID) from workspace \(wsID)")
-            return
-          }
-        }
-      }
-    }
-  }
 
   private func removeWindowsForPID(_ pid: pid_t) {
     for (screenID, var screenState) in state.screens {
@@ -1234,37 +1204,7 @@ public class WindowManager {
     return false
   }
 
-  // MARK: - Workspace-specific tiling
 
-  private func screenIDForWorkspace(_ wsID: WorkspaceID) -> ScreenID? {
-    return state.screens.first(where: { $0.value.activeWorkspaceID == wsID })?.key
-  }
-
-  private func retileWorkspace(_ wsID: WorkspaceID) {
-    guard let screenID = screenIDForWorkspace(wsID),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else {
-      return
-    }
-    let context = LayoutContext(screen: screenState.info, gaps: gaps)
-    let output = LayoutResolver.resolve(workspace, context)
-    workspace.scrollOffset = output.offset
-    screenState.workspaces[wsID] = workspace
-    state.screens[screenID] = screenState
-    applyEpoch &+= 1
-    for column in workspace.columns {
-      for node in column.windows {
-        if let frame = output.frames[node.id] {
-          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
-        }
-      }
-    }
-    AXWindowBridge.applyFrames(output.frames, store: windowStore)
-    if !output.frames.isEmpty {
-      tiler_debug("Laid out \(output.frames.count) windows on workspace \(wsID)")
-    }
-  }
 
   private func hideInactiveWorkspaces() {
     guard activeScreenID() != nil, activeWorkspaceID() != nil
