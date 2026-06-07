@@ -56,7 +56,7 @@ public class WindowManager {
     nextGroupToken &+= 1
     return GroupKey(value: nextGroupToken)
   }
-  private var appliedWindows: [CGWindowID: AppliedWindow] = [:]
+  private var appliedWindows: [GroupKey: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
@@ -258,7 +258,8 @@ public class WindowManager {
       let decision: EchoDecision
       if let observed = AXWindowBridge.currentFrame(for: element) {
         decision = classifyGeometryChange(
-          observed: observed, applied: appliedWindows[wid]?.frame, tolerance: 2.0)
+          observed: observed, applied: groupKey(forID: wid).flatMap { appliedWindows[$0]?.frame },
+          tolerance: 2.0)
       } else {
         decision = .genuineMove
       }
@@ -364,7 +365,7 @@ public class WindowManager {
             // Absent from the on-screen list. Keep it if it has no applied frame yet (just
             // added, not laid out) or if that frame is essentially off-screen (we parked
             // it); otherwise it is expected-visible but unrendered — a background tab.
-            guard let frame = appliedWindows[window.id]?.frame else {
+            guard let frame = appliedWindows[window.groupKey]?.frame else {
               stillAlive.insert(window.id)
               continue
             }
@@ -422,7 +423,7 @@ public class WindowManager {
         activeManagedState.columns
         .flatMap { $0.windows }
         .compactMap { win -> (id: CGWindowID, pid: pid_t, applied: NSRect)? in
-          guard let frame = appliedWindows[win.id]?.frame else { return nil }
+          guard let frame = appliedWindows[win.groupKey]?.frame else { return nil }
           return (win.id, win.pid, frame)
         }
 
@@ -472,10 +473,6 @@ public class WindowManager {
     for (oldID, newID) in tabSwaps {
       guard let info = windowInfo[newID] else { continue }
       swapWindowID(from: oldID, to: newID, title: info.title)
-      if let record = appliedWindows[oldID] {
-        appliedWindows[newID] = record
-      }
-      appliedWindows.removeValue(forKey: oldID)
       missingCounts.removeValue(forKey: oldID)
       resolveCounts.removeValue(forKey: oldID)
     }
@@ -547,11 +544,11 @@ public class WindowManager {
     }
 
     // Prune appliedWindows for windows no longer in state
-    let liveIDs = Set(
+    let liveGroupKeys = Set(
       state.screens.values.flatMap { $0.workspaces.values }.flatMap { $0.columns }.flatMap {
         $0.windows
-      }.map { $0.id })
-    appliedWindows = appliedWindows.filter { liveIDs.contains($0.key) }
+      }.map { $0.groupKey })
+    appliedWindows = appliedWindows.filter { liveGroupKeys.contains($0.key) }
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
@@ -632,6 +629,7 @@ public class WindowManager {
       for (wsID, var workspace) in screenState.workspaces {
         for (colIdx, var column) in workspace.columns.enumerated() {
           if let removeIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
+            let removedKey = column.windows[removeIdx].groupKey
             column.windows.remove(at: removeIdx)
 
             if column.windows.isEmpty {
@@ -650,7 +648,7 @@ public class WindowManager {
 
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
-            appliedWindows.removeValue(forKey: windowID)
+            appliedWindows.removeValue(forKey: removedKey)
             tiler_log("Removed window \(windowID) from workspace \(wsID)")
             return
           }
@@ -666,11 +664,13 @@ public class WindowManager {
         var changed = false
         for colIdx in workspace.columns.indices.reversed() {
           let before = workspace.columns[colIdx].windows.count
-          let removedWIDs = workspace.columns[colIdx].windows.filter { $0.pid == pid }.map { $0.id }
+          let removedKeys = workspace.columns[colIdx].windows.filter { $0.pid == pid }.map {
+            $0.groupKey
+          }
           workspace.columns[colIdx].windows.removeAll { $0.pid == pid }
           if workspace.columns[colIdx].windows.count < before {
             changed = true
-            for wid in removedWIDs { appliedWindows.removeValue(forKey: wid) }
+            for gk in removedKeys { appliedWindows.removeValue(forKey: gk) }
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -706,6 +706,18 @@ public class WindowManager {
         }
       }
     }
+  }
+
+  /// The stable groupKey of the tile currently backed by `wid`, or nil if `wid` isn't a tile.
+  private func groupKey(forID wid: CGWindowID) -> GroupKey? {
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          if let node = column.windows.first(where: { $0.id == wid }) { return node.groupKey }
+        }
+      }
+    }
+    return nil
   }
 
   /// True when the given window id is tracked by any tile in any workspace.
@@ -1031,7 +1043,7 @@ public class WindowManager {
     guard col.focusedWindowIndex < col.windows.count else { return }
     let window = col.windows[col.focusedWindowIndex]
     tiler_debug(
-      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.id]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
+      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.groupKey]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
 
     var targetElement = windowStore.element(for: window.id)
     var adopted = false
@@ -1041,13 +1053,11 @@ public class WindowManager {
     // currently-active tab. Switching tabs emits no usable notification, so our stored id
     // can be a stale sibling; raising it would force the app back to that tab. Resolve the
     // active tab and adopt its id in place, then raise it (a no-op for tab selection).
-    if let tileFrame = appliedWindows[window.id]?.frame,
+    if let tileFrame = appliedWindows[window.groupKey]?.frame,
       let active = currentActiveTab(pid: window.pid, tileFrame: tileFrame, currentID: window.id),
       active.wid != window.id
     {
       swapWindowID(from: window.id, to: active.wid, title: window.title)
-      if let record = appliedWindows[window.id] { appliedWindows[active.wid] = record }
-      appliedWindows.removeValue(forKey: window.id)
       missingCounts.removeValue(forKey: window.id)
       resolveCounts.removeValue(forKey: window.id)
       targetElement = active.element
@@ -1064,7 +1074,7 @@ public class WindowManager {
       if let app = NSRunningApplication(processIdentifier: window.pid) {
         app.activate(options: [.activateIgnoringOtherApps])
       }
-      if let tileFrame = appliedWindows[window.id]?.frame,
+      if let tileFrame = appliedWindows[window.groupKey]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
       {
         AXUIElementSetAttributeValue(fallback, kAXMainAttribute as CFString, true as CFTypeRef)
@@ -1090,7 +1100,7 @@ public class WindowManager {
     // an invisible, unfocusable column. Kick a reconcile so the reaper collapses it now
     // rather than on the next window open/close.
     if !adopted,
-      let frame = appliedWindows[window.id]?.frame,
+      let frame = appliedWindows[window.groupKey]?.frame,
       let screenID = activeScreenID(),
       let visibleFrame = state.screens[screenID]?.info.visibleFrame
     {
@@ -1205,8 +1215,12 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     applyEpoch &+= 1
-    for (wid, frame) in output.frames {
-      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: frame)
+    for column in workspace.columns {
+      for node in column.windows {
+        if let frame = output.frames[node.id] {
+          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
+        }
+      }
     }
     AXWindowBridge.applyFrames(output.frames, store: windowStore)
     if !output.frames.isEmpty {
@@ -1230,7 +1244,7 @@ public class WindowManager {
           for window in column.windows {
             let wid = window.id
             // Idempotency: already parked if record's minX is left of the visible area
-            if let record = appliedWindows[wid], record.frame.minX < visibleFrame.minX {
+            if let record = appliedWindows[window.groupKey], record.frame.minX < visibleFrame.minX {
               continue
             }
             guard let element = windowStore.element(for: wid) else { continue }
@@ -1250,7 +1264,9 @@ public class WindowManager {
     guard !frames.isEmpty else { return }
     // Record before applying so incoming AX events are treated as echoes
     for (wid, parked) in frames {
-      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: parked)
+      if let gk = groupKey(forID: wid) {
+        appliedWindows[gk] = AppliedWindow(epoch: applyEpoch, frame: parked)
+      }
     }
     AXWindowBridge.applyFrames(frames, store: windowStore)
     tiler_debug("Parked \(frames.count) windows from inactive workspaces")
@@ -1272,8 +1288,12 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     applyEpoch &+= 1
-    for (wid, frame) in output.frames {
-      appliedWindows[wid] = AppliedWindow(epoch: applyEpoch, frame: frame)
+    for column in workspace.columns {
+      for node in column.windows {
+        if let frame = output.frames[node.id] {
+          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
+        }
+      }
     }
     AXWindowBridge.applyFrames(output.frames, store: windowStore)
     if !output.frames.isEmpty {
@@ -1292,19 +1312,23 @@ public class WindowManager {
       let workspace = screenState.workspaces[wsID]
     else { return }
 
-    let liveWIDs = Set(workspace.columns.flatMap { $0.windows }.map { $0.id })
+    var idForGroup: [GroupKey: CGWindowID] = [:]
+    for column in workspace.columns {
+      for node in column.windows { idForGroup[node.groupKey] = node.id }
+    }
 
-    for (wid, record) in appliedWindows where record.epoch == applyEpoch && liveWIDs.contains(wid) {
+    for (gk, record) in appliedWindows where record.epoch == applyEpoch && idForGroup[gk] != nil {
+      let wid = idForGroup[gk]!
       guard let element = windowStore.element(for: wid) else { continue }
       guard let observed = AXWindowBridge.currentFrame(for: element) else { continue }
 
       if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
-        appliedWindows[wid]?.corrections = 0
-      } else if (appliedWindows[wid]?.corrections ?? 0) < 3 {
+        appliedWindows[gk]?.corrections = 0
+      } else if (appliedWindows[gk]?.corrections ?? 0) < 3 {
         tiler_debug(
-          "correct: wid=\(wid) re-issue attempt=\((appliedWindows[wid]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)")
+          "correct: wid=\(wid) re-issue attempt=\((appliedWindows[gk]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)")
         AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
-        appliedWindows[wid]?.corrections += 1
+        appliedWindows[gk]?.corrections += 1
       } else {
         // Budget exhausted: the window won't reach the exact frame (min-size or
         // character-cell quantization). If it's wider than desired, absorb that into
@@ -1316,7 +1340,7 @@ public class WindowManager {
         if observed.width > record.frame.width + 2.0 {
           absorbMinWidth(wid: wid, observedWidth: observed.width)
         } else {
-          appliedWindows[wid]?.frame = observed
+          appliedWindows[gk]?.frame = observed
         }
       }
     }
