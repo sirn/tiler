@@ -1029,6 +1029,7 @@ public class WindowManager {
       "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.id]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
 
     var targetElement = windowStore.element(for: window.id)
+    var adopted = false
 
     // A native tab group has exactly one window in the on-screen CGWindowList (background
     // tabs are absent), so the on-screen window matching this tile's frame is the group's
@@ -1045,6 +1046,7 @@ public class WindowManager {
       missingCounts.removeValue(forKey: window.id)
       resolveCounts.removeValue(forKey: window.id)
       targetElement = active.element
+      adopted = true
       tiler_debug("focus: tab adopt \(window.id) -> \(active.wid)")
     }
 
@@ -1074,6 +1076,23 @@ public class WindowManager {
     }
     tiler_debug(
       "focus: raised wid=\(window.id) pid=\(window.pid) appFound=\(NSRunningApplication(processIdentifier: window.pid) != nil)")
+
+    // If we raised the stored tile without adopting an active tab, and that tile is absent
+    // from the on-screen CGWindowList while we expect it visible (its applied frame
+    // substantially overlaps the visible area), it is a native background tab rendering as
+    // an invisible, unfocusable column. Kick a reconcile so the reaper collapses it now
+    // rather than on the next window open/close.
+    if !adopted,
+      let frame = appliedWindows[window.id]?.frame,
+      let screenID = activeScreenID(),
+      let visibleFrame = state.screens[screenID]?.info.visibleFrame
+    {
+      let overlap = min(frame.maxX, visibleFrame.maxX) - max(frame.minX, visibleFrame.minX)
+      if overlap > 50, !isOnScreen(window.id) {
+        tiler_debug("focus: tile=\(window.id) is a visible background tab — kicking reconcile")
+        setNeedsReconcile()
+      }
+    }
   }
 
   /// The currently-active tab window for a native tab group: the single on-screen
@@ -1145,6 +1164,19 @@ public class WindowManager {
       }
     }
     return nil
+  }
+
+  /// True if `wid` currently appears in the on-screen CGWindowList. A native background tab
+  /// does not, even when it remains a resolvable AX window.
+  private func isOnScreen(_ wid: CGWindowID) -> Bool {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return true }
+    for info in list {
+      if let w = info[kCGWindowNumber as String] as? CGWindowID, w == wid { return true }
+    }
+    return false
   }
 
   // MARK: - Workspace-specific tiling
