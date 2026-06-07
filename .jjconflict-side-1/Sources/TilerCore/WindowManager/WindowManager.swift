@@ -1026,7 +1026,26 @@ public class WindowManager {
     workspace.focusedColumnIndex = result.focusedColumnIndex
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
+    refreshActiveTabs(screenID: screenID, wsID: wsID)
     setNeedsRetile()
+  }
+
+  /// Refresh every tile in the given workspace to its native-tab group's live active tab,
+  /// so a subsequent retile applies frames to the visible window rather than an unmovable
+  /// background tab. A no-op for healthy tiles (currentActiveTab returns nil when the tile
+  /// already backs the on-screen window); only stale tiles are adopted, under the same
+  /// unique-match / not-already-managed guards as the focus path.
+  private func refreshActiveTabs(screenID: ScreenID, wsID: WorkspaceID) {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID] else { return }
+    // Snapshot the tiles first; swapWindowID mutates state during the loop.
+    let tiles = workspace.columns.flatMap { $0.windows }
+    for node in tiles {
+      guard let frame = appliedWindows[node.groupKey]?.frame,
+        let active = currentActiveTab(pid: node.pid, tileFrame: frame, currentID: node.id)
+      else { continue }
+      swapWindowID(from: node.id, to: active.wid, title: node.title)
+      tiler_debug("consume/expel: refresh tile \(node.id) -> \(active.wid) (live active tab)")
+    }
   }
 
   // MARK: - Focus helpers
