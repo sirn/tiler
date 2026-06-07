@@ -40,22 +40,22 @@ public class ConfigLoader {
 
     // [general]
     if let general = toml["general"]?.table {
-      if let og = general["outer_gaps"]?.double { config.general.outerGaps = CGFloat(og) }
-      if let ig = general["inner_gaps"]?.double { config.general.innerGaps = CGFloat(ig) }
-      if let cg = general["column_gaps"]?.double { config.general.columnGaps = CGFloat(cg) }
+      if let og = general["outer_gaps"]?.double { config.general.outerGaps = max(0, CGFloat(og)) }
+      if let ig = general["inner_gaps"]?.double { config.general.innerGaps = max(0, CGFloat(ig)) }
+      if let cg = general["column_gaps"]?.double { config.general.columnGaps = max(0, CGFloat(cg)) }
     }
 
     // [layout]
     if let layout = toml["layout"]?.table {
       if let dcw = layout["default_column_width"]?.double {
-        config.layout.defaultColumnWidth = CGFloat(dcw)
+        config.layout.defaultColumnWidth = min(max(CGFloat(dcw), 0.1), 1.0)
       }
-      if let cfc = layout["center_focused_column"]?.bool { config.layout.centerFocusedColumn = cfc }
+
     }
 
     // [workspaces]
     if let workspaces = toml["workspaces"]?.table {
-      if let count = workspaces["count"]?.int { config.workspaces.count = count }
+      if let count = workspaces["count"]?.int { config.workspaces.count = max(1, count) }
     }
 
     // [[keybind]]
