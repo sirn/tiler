@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 
 public enum TilerEvent {
   case appLaunched(pid_t)
@@ -17,10 +18,13 @@ public class EventBroker {
 
   private var appObservers: [pid_t: AppObserver] = [:]
   private var observers: [NSObjectProtocol] = []
+  private var started = false
 
   public init() {}
 
   public func start() {
+    guard !started else { return }
+    started = true
     let nc = NSWorkspace.shared.notificationCenter
 
     observers.append(
@@ -64,6 +68,7 @@ public class EventBroker {
     }
     observers.removeAll()
     appObservers.removeAll()
+    started = false
   }
 
   private func registerAppObserver(pid: pid_t) {
@@ -74,8 +79,7 @@ public class EventBroker {
 
       let notifStr = notification as String
       if tilerDebugEnabled {
-        var nwid: CGWindowID = 0
-        _ = _AXUIElementGetWindow(element, &nwid)
+        let nwid = axGetWindowID(element) ?? 0
         let napp = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
         tiler_debug("event: \(notifStr) pid=\(pid) app=\(napp) wid=\(nwid)")
       }
