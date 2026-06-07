@@ -291,24 +291,49 @@ public class WindowManager {
       "reconcile: \(totalCandidates) candidates, \(tileableIDs.count) tileable, \(skippedNoElement) no element, \(skippedNotTileable) not tileable"
     )
 
-    // A managed window survives reconcile iff it is currently a tileable AX window:
-    // its element is retrievable from the store AND WindowFilter.isTileable returns true.
-    // This correctly keeps off-screen-parked windows (not minimized/fullscreen, so still
-    // tileable even when absent from the on-screen CGWindowList), while dropping minimized
-    // windows (isTileable == false), fullscreen windows (isTileable == false), and
-    // destroyed/terminated windows (element == nil after refresh).
-    let stillAlive: Set<CGWindowID> = Set(
-      state.screens.values
-        .flatMap { $0.workspaces.values }
-        .flatMap { $0.columns }
-        .flatMap { $0.windows }
-        .compactMap { window -> CGWindowID? in
-          guard let element = windowStore.element(for: window.id),
-            WindowFilter.isTileable(element)
-          else { return nil }
-          return window.id
+    // A managed window survives reconcile iff it is a tileable AX window AND it is either
+    // present in the on-screen CGWindowList or one we deliberately parked off-screen. A
+    // native background tab (in apps that keep every tab in the AX window list) is
+    // AX-tileable and resolvable but absent from the on-screen list; if its column sits in
+    // the visible area it renders as an invisible, unfocusable gap. We detect that by the
+    // window being absent from the on-screen list while its applied frame substantially
+    // overlaps the visible area, and drop it (debounced via missingCounts) so the tab group
+    // collapses back to its single visible tab. Windows we parked off-screen overlap the
+    // visible area by at most the ~1px edge sliver, so they are kept. Minimized / fullscreen
+    // (isTileable == false) and destroyed (element == nil) windows remain dropped.
+    let onScreenIDs = Set(windowInfo.keys)
+    var stillAlive: Set<CGWindowID> = []
+    for screenState in state.screens.values {
+      let visibleFrame = screenState.info.visibleFrame
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for window in column.windows {
+            guard let element = windowStore.element(for: window.id),
+              WindowFilter.isTileable(element)
+            else { continue }
+            if onScreenIDs.contains(window.id) {
+              stillAlive.insert(window.id)
+              continue
+            }
+            // Absent from the on-screen list. Keep it if it has no applied frame yet (just
+            // added, not laid out) or if that frame is essentially off-screen (we parked
+            // it); otherwise it is expected-visible but unrendered — a background tab.
+            guard let frame = appliedWindows[window.id]?.frame else {
+              stillAlive.insert(window.id)
+              continue
+            }
+            let overlap =
+              min(frame.maxX, visibleFrame.maxX) - max(frame.minX, visibleFrame.minX)
+            if overlap <= 50 {
+              stillAlive.insert(window.id)
+            } else {
+              tiler_debug(
+                "reconcile: background-tab drop wid=\(window.id) pid=\(window.pid) overlap=\(Int(overlap)) (absent from on-screen list)")
+            }
+          }
         }
-    )
+      }
+    }
 
     // Compute the set of all managed window ids before any removal.
     let managedIDs = Set(
