@@ -1235,37 +1235,7 @@ public class WindowManager {
     return false
   }
 
-  // MARK: - Workspace-specific tiling
 
-  private func screenIDForWorkspace(_ wsID: WorkspaceID) -> ScreenID? {
-    return state.screens.first(where: { $0.value.activeWorkspaceID == wsID })?.key
-  }
-
-  private func retileWorkspace(_ wsID: WorkspaceID) {
-    guard let screenID = screenIDForWorkspace(wsID),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else {
-      return
-    }
-    let context = LayoutContext(screen: screenState.info, gaps: gaps)
-    let output = LayoutResolver.resolve(workspace, context)
-    workspace.scrollOffset = output.offset
-    screenState.workspaces[wsID] = workspace
-    state.screens[screenID] = screenState
-    applyEpoch &+= 1
-    for column in workspace.columns {
-      for node in column.windows {
-        if let frame = output.frames[node.id] {
-          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
-        }
-      }
-    }
-    AXWindowBridge.applyFrames(output.frames, store: windowStore)
-    if !output.frames.isEmpty {
-      tiler_debug("Laid out \(output.frames.count) windows on workspace \(wsID)")
-    }
-  }
 
   private func hideInactiveWorkspaces() {
     guard activeScreenID() != nil, activeWorkspaceID() != nil
