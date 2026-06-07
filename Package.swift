@@ -13,14 +13,8 @@ let package = Package(
             dependencies: ["TilerCore"]
         ),
         .target(
-            name: "CSkyLight",
-            linkerSettings: [
-                .linkedFramework("ApplicationServices")
-            ]
-        ),
-        .target(
             name: "TilerCore",
-            dependencies: ["TOMLKit", "CSkyLight"]
+            dependencies: ["TOMLKit"]
         ),
         .testTarget(
             name: "TilerCoreTests",
