@@ -53,6 +53,7 @@ public class WindowManager {
   }
   private var applyEpoch: UInt64 = 0
   private var lastFocusedWid: CGWindowID = 0
+  private var lastFocusedPid: pid_t = 0
   private var nextGroupToken: UInt64 = 0
   private func mintGroupKey() -> GroupKey {
     nextGroupToken &+= 1
@@ -1130,8 +1131,9 @@ public class WindowManager {
 
     // Prefer SkyLight force-focus: it moves keyboard focus (and selects a native tab)
     // even when AXRaise cannot. Fall back to AX raise + activate if it's unavailable.
-    if tiler_focus_window(window.pid, raisedWid, lastFocusedWid) {
+    if tiler_focus_window(window.pid, raisedWid, lastFocusedPid, lastFocusedWid) {
       lastFocusedWid = raisedWid
+      lastFocusedPid = window.pid
       tiler_debug("focus: skylight focus wid=\(raisedWid) pid=\(window.pid)")
     } else {
       AXUIElementPerformAction(element, kAXRaiseAction as CFString)
@@ -1140,6 +1142,7 @@ public class WindowManager {
         app.activate(options: [.activateIgnoringOtherApps])
       }
       lastFocusedWid = raisedWid
+      lastFocusedPid = window.pid
       tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
     }
 
