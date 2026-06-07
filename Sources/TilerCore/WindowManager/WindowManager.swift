@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import CSkyLight
 
 /// Snapshot for the menu bar workspace indicator.
 public struct WorkspaceIndicator: Equatable {
@@ -61,6 +62,7 @@ public class WindowManager {
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
   private var resolveRetryToken: UInt64 = 0
+  private var consumeRefreshToken: UInt64 = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -1027,24 +1029,45 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     refreshActiveTabs(screenID: screenID, wsID: wsID)
+    scheduleDeferredTabRefresh(screenID: screenID, wsID: wsID)
     setNeedsRetile()
   }
 
-  /// Refresh every tile in the given workspace to its native-tab group's live active tab,
-  /// so a subsequent retile applies frames to the visible window rather than an unmovable
-  /// background tab. A no-op for healthy tiles (currentActiveTab returns nil when the tile
-  /// already backs the on-screen window); only stale tiles are adopted, under the same
-  /// unique-match / not-already-managed guards as the focus path.
-  private func refreshActiveTabs(screenID: ScreenID, wsID: WorkspaceID) {
-    guard let workspace = state.screens[screenID]?.workspaces[wsID] else { return }
+  /// Refresh every tile in the workspace to its native-tab group's live active tab.
+  /// A no-op for healthy tiles; an in-place id swap (groupKey preserved) for stale
+  /// background-tab tiles. Returns true if any tile was adopted.
+  @discardableResult
+  private func refreshActiveTabs(screenID: ScreenID, wsID: WorkspaceID) -> Bool {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID] else { return false }
     // Snapshot the tiles first; swapWindowID mutates state during the loop.
     let tiles = workspace.columns.flatMap { $0.windows }
+    var changed = false
     for node in tiles {
       guard let frame = appliedWindows[node.groupKey]?.frame,
         let active = currentActiveTab(pid: node.pid, tileFrame: frame, currentID: node.id)
       else { continue }
       swapWindowID(from: node.id, to: active.wid, title: node.title)
-      tiler_debug("consume/expel: refresh tile \(node.id) -> \(active.wid) (live active tab)")
+      changed = true
+      tiler_debug("tab refresh: tile \(node.id) -> \(active.wid) (live active tab)")
+    }
+    return changed
+  }
+
+  /// Re-run the active-tab refresh a few times after a structural change or a focus that
+  /// landed on a stale tile. Ghostty intermittently drops a tab from its AX window list, so
+  /// an immediate refresh can miss the live tab; this settle-and-retry catches it once the
+  /// flicker clears. Token-coalesced: a newer schedule supersedes the previous chain, and a
+  /// step only retiles when it actually adopted a tile.
+  private func scheduleDeferredTabRefresh(screenID: ScreenID, wsID: WorkspaceID) {
+    consumeRefreshToken &+= 1
+    let token = consumeRefreshToken
+    for delay in [0.15, 0.35, 0.6] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self = self, self.consumeRefreshToken == token else { return }
+        if self.refreshActiveTabs(screenID: screenID, wsID: wsID) {
+          self.setNeedsRetile()
+        }
+      }
     }
   }
 
@@ -1061,6 +1084,7 @@ public class WindowManager {
       "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.groupKey]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
 
     var targetElement = windowStore.element(for: window.id)
+    var raisedWid = window.id
     var adopted = false
 
     // A native tab group has exactly one window in the on-screen CGWindowList (background
@@ -1076,6 +1100,7 @@ public class WindowManager {
       missingCounts.removeValue(forKey: window.id)
       resolveCounts.removeValue(forKey: window.id)
       targetElement = active.element
+      raisedWid = active.wid
       adopted = true
       tiler_debug("focus: tab adopt \(window.id) -> \(active.wid)")
     }
@@ -1096,18 +1121,24 @@ public class WindowManager {
         AXUIElementPerformAction(fallback, kAXRaiseAction as CFString)
       }
       setNeedsReconcile()
+      if let sid = activeScreenID(), let wid = activeWorkspaceID() {
+        scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
+      }
       return
     }
 
-    // Activate the app first so bringing it to the front does not re-focus its previous
-    // main window; then make this window main and raise it last so it ends up key.
-    if let app = NSRunningApplication(processIdentifier: window.pid) {
-      app.activate(options: [.activateIgnoringOtherApps])
+    // Prefer SkyLight force-focus: it moves keyboard focus (and selects a native tab)
+    // even when AXRaise cannot. Fall back to AX raise + activate if it's unavailable.
+    if tiler_focus_window(window.pid, raisedWid) {
+      tiler_debug("focus: skylight focus wid=\(raisedWid) pid=\(window.pid)")
+    } else {
+      AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+      AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+      if let app = NSRunningApplication(processIdentifier: window.pid) {
+        app.activate(options: [.activateIgnoringOtherApps])
+      }
+      tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
     }
-    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
-    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-    tiler_debug(
-      "focus: raised wid=\(window.id) pid=\(window.pid) appFound=\(NSRunningApplication(processIdentifier: window.pid) != nil)")
 
     // If we raised the stored tile without adopting an active tab, and that tile is absent
     // from the on-screen CGWindowList while we expect it visible (its applied frame
@@ -1123,6 +1154,9 @@ public class WindowManager {
       if overlap > 50, !isOnScreen(window.id) {
         tiler_debug("focus: tile=\(window.id) is a visible background tab — kicking reconcile")
         setNeedsReconcile()
+        if let sid = activeScreenID(), let wid = activeWorkspaceID() {
+          scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
+        }
       }
     }
   }
