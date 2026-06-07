@@ -73,6 +73,12 @@ public class EventBroker {
       guard let self = self else { return }
 
       let notifStr = notification as String
+      if tilerDebugEnabled {
+        var nwid: CGWindowID = 0
+        _ = _AXUIElementGetWindow(element, &nwid)
+        let napp = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
+        tiler_debug("event: \(notifStr) pid=\(pid) app=\(napp) wid=\(nwid)")
+      }
 
       if notifStr == kAXFocusedWindowChangedNotification as String {
         self.onEvent?(.focusChanged(pid, element))
