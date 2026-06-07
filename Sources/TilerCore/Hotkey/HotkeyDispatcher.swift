@@ -11,6 +11,10 @@ public class HotkeyDispatcher {
 
   public init() {}
 
+  deinit {
+    stop()
+  }
+
   public func setActionHandler(_ handler: @escaping ActionHandler) {
     self.handler = handler
   }
