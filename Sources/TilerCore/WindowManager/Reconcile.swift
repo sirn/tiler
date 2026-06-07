@@ -29,6 +29,7 @@ public struct ReconcilePlan: Equatable {
   public let hasPendingMiss: Bool
   public let updatedResolveCounts: [CGWindowID: Int]
   public let hasPendingResolve: Bool
+  public let hasPendingNoElementResolve: Bool
 }
 
 /// Pure membership diff. Inputs are plain facts gathered by the caller.
@@ -42,6 +43,7 @@ public func reconcilePlan(
   missingCounts: [CGWindowID: Int],
   missThreshold: Int,
   unresolvedIDs: Set<CGWindowID> = [],
+  noElementIDs: Set<CGWindowID> = [],
   resolveCounts: [CGWindowID: Int] = [:],
   resolveThreshold: Int = 8
 ) -> ReconcilePlan {
@@ -69,7 +71,12 @@ public func reconcilePlan(
   // Keep counts only for ids still unresolved this pass (resolved/gone ids drop out)
   resolve = resolve.filter { unresolvedIDs.contains($0.key) }
 
+  // No-element windows always trigger a retry regardless of count
+  // (they'll succeed once the AX element becomes available)
+  let hasPendingNoElementResolve = !noElementIDs.isEmpty
+
   return ReconcilePlan(
     toAdd: toAdd, toReap: toReap, updatedMissingCounts: counts, hasPendingMiss: hasPendingMiss,
-    updatedResolveCounts: resolve, hasPendingResolve: hasPendingResolve)
+    updatedResolveCounts: resolve, hasPendingResolve: hasPendingResolve,
+    hasPendingNoElementResolve: hasPendingNoElementResolve)
 }
