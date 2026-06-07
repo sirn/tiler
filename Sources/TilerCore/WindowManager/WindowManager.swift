@@ -370,6 +370,8 @@ public class WindowManager {
       resolveThreshold: 8)
     missingCounts = plan.updatedMissingCounts
     resolveCounts = plan.updatedResolveCounts
+    tiler_debug(
+      "reconcile: tileable=\(tileableIDs.sorted()) managed=\(managedIDs.sorted()) stillAlive=\(stillAlive.sorted()) toAdd=\(plan.toAdd.sorted()) toReap=\(plan.toReap.sorted())")
 
     // Tab-correlation pass: when a native macOS tab switch happens, the previously-active tab
     // window drops out of kAXWindowsAttribute (making it vanish from stillAlive) and a new
@@ -459,6 +461,10 @@ public class WindowManager {
         var changed = false
         for colIdx in workspace.columns.indices.reversed() {
           let before = workspace.columns[colIdx].windows.count
+          let reaped = workspace.columns[colIdx].windows.filter { plan.toReap.contains($0.id) }
+          for w in reaped {
+            tiler_debug("reconcile: reaping wid=\(w.id) pid=\(w.pid) title='\(w.title)' from ws=\(wsID)")
+          }
           workspace.columns[colIdx].windows.removeAll { plan.toReap.contains($0.id) }
           if workspace.columns[colIdx].windows.count < before {
             changed = true
@@ -994,6 +1000,8 @@ public class WindowManager {
     let col = workspace.columns[workspace.focusedColumnIndex]
     guard col.focusedWindowIndex < col.windows.count else { return }
     let window = col.windows[col.focusedWindowIndex]
+    tiler_debug(
+      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.id]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
 
     var targetElement = windowStore.element(for: window.id)
 
@@ -1012,10 +1020,11 @@ public class WindowManager {
       missingCounts.removeValue(forKey: window.id)
       resolveCounts.removeValue(forKey: window.id)
       targetElement = active.element
-      tiler_debug("Native tab raise adopt: wid \(window.id) -> \(active.wid)")
+      tiler_debug("focus: tab adopt \(window.id) -> \(active.wid)")
     }
 
     guard let element = targetElement else {
+      tiler_debug("focus: no element for tile=\(window.id) pid=\(window.pid) — fallback raise + reconcile")
       // The stored id is a dead/invisible tab and the active tab couldn't be adopted cleanly
       // (transient mid tab-switch, or it's tracked elsewhere). Fall back to raising whatever
       // on-screen window sits at this tile's frame so focus still lands on the group, then
@@ -1038,6 +1047,8 @@ public class WindowManager {
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
     }
+    tiler_debug(
+      "focus: raised wid=\(window.id) pid=\(window.pid) appFound=\(NSRunningApplication(processIdentifier: window.pid) != nil)")
   }
 
   /// The currently-active tab window for a native tab group: the single on-screen
