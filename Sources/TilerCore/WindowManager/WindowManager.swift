@@ -51,6 +51,11 @@ public class WindowManager {
     var corrections: Int = 0
   }
   private var applyEpoch: UInt64 = 0
+  private var nextGroupToken: UInt64 = 0
+  private func mintGroupKey() -> GroupKey {
+    nextGroupToken &+= 1
+    return GroupKey(value: nextGroupToken)
+  }
   private var appliedWindows: [CGWindowID: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
@@ -582,7 +587,7 @@ public class WindowManager {
       var workspace = screenState.workspaces[wsID]
     else { return }
 
-    let node = WindowNode(id: windowID, pid: pid, title: title)
+    let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
 
     let column = Column(
       windows: [node], focusedWindowIndex: 0, widthFraction: layoutConfig.defaultColumnWidth)
@@ -610,8 +615,8 @@ public class WindowManager {
       for (wsID, var workspace) in screenState.workspaces {
         for (colIdx, var column) in workspace.columns.enumerated() {
           if let winIdx = column.windows.firstIndex(where: { $0.id == oldID }) {
-            let pid = column.windows[winIdx].pid
-            column.windows[winIdx] = WindowNode(id: newID, pid: pid, title: title)
+            let existing = column.windows[winIdx]
+            column.windows[winIdx] = WindowNode(id: newID, groupKey: existing.groupKey, pid: existing.pid, title: title)
             workspace.columns[colIdx] = column
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
