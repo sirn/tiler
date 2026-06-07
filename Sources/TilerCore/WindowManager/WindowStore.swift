@@ -12,14 +12,14 @@ public final class WindowStore {
   /// managedPIDs is unioned with the on-screen CGWindowList pids so that parked managed
   /// windows (off the current CGWindowList) are still resolved via AX identity.
   public func refresh(managedPIDs: Set<pid_t> = []) {
-    elements.removeAll(keepingCapacity: true)
-    pidWindows.removeAll(keepingCapacity: true)
     guard
       let windowInfo = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
     else {
       return
     }
+    elements.removeAll(keepingCapacity: true)
+    pidWindows.removeAll(keepingCapacity: true)
 
     // First pass: build CGWindowList info indexed by PID for fallback matching
     var cgWindowsByPID: [pid_t: [(wid: CGWindowID, bounds: NSRect, title: String)]] = [:]
@@ -234,11 +234,6 @@ public final class WindowStore {
     var wid: CGWindowID = 0
     let err = _AXUIElementGetWindow(element, &wid)
     return err == .success ? wid : nil
-  }
-
-  /// Get all CGWindowIDs for a given PID.
-  public func windowIDs(forPID pid: pid_t) -> [CGWindowID] {
-    return pidWindows[pid].map { Array($0) } ?? []
   }
 
   /// Remove all state for a terminated PID.

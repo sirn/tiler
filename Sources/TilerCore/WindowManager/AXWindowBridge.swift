@@ -2,11 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-public enum AXWindowBridgeError: Error {
-  case cannotGetWindowID
-  case cannotSetPosition
-  case cannotSetSize
-}
+
 
 public enum AXWindowBridge {
 
