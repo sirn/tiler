@@ -248,10 +248,37 @@ public class WindowManager {
       setNeedsReconcile()
     case .focusChanged(let pid, let element):
       handleFocusChanged(pid: pid, element: element)
-    case .geometryChanged(_, let element):
+    case .geometryChanged(let pid, let element):
       guard let wid = windowStore.windowID(for: element) else { return }
+      let observed = AXWindowBridge.currentFrame(for: element)
+
+      // Native tab activation: switching a tab moves the newly-active (still unmanaged) tab
+      // into the group's frame. If it uniquely matches a managed tile of the same pid whose
+      // own id is a background tab (absent from the on-screen CGWindowList), adopt the live
+      // id in place so the tile tracks the visible tab; otherwise a snap-back would position
+      // the invisible background tab and leave the visible one unmanaged and mispositioned.
+      // The background-tab guard (matched tile not on-screen) is what makes this safe: a
+      // normal retile of a visible window never matches it, so this cannot misfire the way
+      // an unguarded swap-on-move would.
+      if let observed, !isManaged(wid),
+        let staleTile = backgroundTabTile(pid: pid, frame: observed, incoming: wid)
+      {
+        var titleRef: CFTypeRef?
+        let title =
+          (AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            == .success ? titleRef as? String : nil) ?? ""
+        swapWindowID(from: staleTile, to: wid, title: title)
+        if let record = appliedWindows[staleTile] { appliedWindows[wid] = record }
+        appliedWindows.removeValue(forKey: staleTile)
+        missingCounts.removeValue(forKey: staleTile)
+        resolveCounts.removeValue(forKey: staleTile)
+        tiler_debug("geometry: tab activate \(staleTile) -> \(wid) (stale background tile)")
+        setNeedsRetile()
+        return
+      }
+
       let decision: EchoDecision
-      if let observed = AXWindowBridge.currentFrame(for: element) {
+      if let observed {
         decision = classifyGeometryChange(
           observed: observed, applied: appliedWindows[wid]?.frame, tolerance: 2.0)
       } else {
@@ -713,6 +740,28 @@ public class WindowManager {
       }
     }
     return false
+  }
+
+  /// Find a managed tile in the active workspace, of `pid`, whose applied frame uniquely
+  /// matches `frame` and whose own window id is a background tab (absent from the on-screen
+  /// CGWindowList). Returns the stale tile id to replace with `incoming`, or nil when there
+  /// is no unique match or the matched tile is still on-screen (a real visible window).
+  private func backgroundTabTile(pid: pid_t, frame: NSRect, incoming: CGWindowID) -> CGWindowID? {
+    guard let screenID = activeScreenID(), let wsID = activeWorkspaceID(),
+      let workspace = state.screens[screenID]?.workspaces[wsID]
+    else { return nil }
+    var matches: [CGWindowID] = []
+    for column in workspace.columns {
+      for win in column.windows where win.pid == pid && win.id != incoming {
+        if let applied = appliedWindows[win.id]?.frame,
+          framesMatch(applied, frame, tolerance: 10)
+        {
+          matches.append(win.id)
+        }
+      }
+    }
+    guard matches.count == 1, let tile = matches.first, !isOnScreen(tile) else { return nil }
+    return tile
   }
 
   // MARK: - Action handling
