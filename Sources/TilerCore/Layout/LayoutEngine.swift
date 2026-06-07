@@ -108,9 +108,8 @@ public enum LayoutEngine {
 
       switch column.mode {
       case .stack:
-        let windowHeight =
-          (colHeight - gaps.innerGaps * CGFloat(column.windows.count - 1))
-          / CGFloat(column.windows.count)
+        let totalGaps = gaps.innerGaps * CGFloat(column.windows.count - 1)
+        let windowHeight = max(1, (colHeight - totalGaps) / CGFloat(column.windows.count))
         // Cocoa y is bottom-origin; lay out the stack top-down so windows[0] is the
         // topmost window (matches the up/down action semantics, where index 0 = top).
         var windowY = usableRect.maxY - windowHeight

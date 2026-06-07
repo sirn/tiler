@@ -2,21 +2,20 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-public enum AXWindowBridgeError: Error {
-  case cannotGetWindowID
-  case cannotSetPosition
-  case cannotSetSize
-}
 
 public enum AXWindowBridge {
+  /// Primary screen height is the correct anchor for the global Cocoa coordinate system.
+  /// macOS uses the primary screen as the global coordinate anchor, so the Cocoa↔AX
+  /// Y-flip formula works universally for all screens.
+  internal static func primaryScreenHeight() -> CGFloat {
+    NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+  }
 
   /// Apply frames to multiple windows at once, using a WindowStore for element lookup.
   /// Issues each frame once (pos→size→pos); convergence is managed by the caller's corrector.
   public static func applyFrames(_ frames: [CGWindowID: NSRect], store: WindowStore) {
-    // The Cocoa↔AX y-flip uses the primary screen height only; this is single-display-correct
-    // but will produce wrong coordinates on secondary screens. TODO: multi-display support.
-    let screenHeight =
-      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    // The Cocoa↔AX y-flip uses the primary screen height as the global coordinate anchor.
+    let screenHeight = primaryScreenHeight()
 
     // Apply pos→size→pos: macOS clamps a window's position based on its current size,
     // so position is reapplied after the resize to correct any clamping that occurred.
@@ -44,8 +43,7 @@ public enum AXWindowBridge {
   /// Apply a single frame to an AXUIElement directly.
   @discardableResult
   public static func applyFrame(_ frame: NSRect, to element: AXUIElement) -> Bool {
-    let screenHeight =
-      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
+    let screenHeight = primaryScreenHeight()
     var pos = CGPoint(x: frame.minX, y: screenHeight - frame.maxY)
     var size = frame.size
 
@@ -93,9 +91,6 @@ public enum AXWindowBridge {
 
   /// Read the current AX frame for an element using the primary screen height.
   static func currentFrame(for element: AXUIElement) -> NSRect? {
-    // Same primary-screen y-flip limitation as applyFrames. TODO: multi-display support.
-    let screenHeight =
-      NSScreen.screens.first?.frame.height ?? CGFloat(CGDisplayPixelsHigh(CGMainDisplayID()))
-    return getAXFrame(element, screenHeight: screenHeight)
+    return getAXFrame(element, screenHeight: primaryScreenHeight())
   }
 }
