@@ -81,10 +81,16 @@ public class WindowManager {
     }
   }
 
+  deinit {
+    stop()
+  }
+
   public func start() {
-    // Trigger initial reconcile to discover existing windows
     setNeedsReconcile()
     scheduleDrain()
+  }
+
+  public func stop() {
   }
 
   // MARK: - Coalescing drain

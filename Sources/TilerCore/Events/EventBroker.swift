@@ -19,6 +19,7 @@ public class EventBroker {
   private var appObservers: [pid_t: AppObserver] = [:]
   private var observers: [NSObjectProtocol] = []
   private var started = false
+  private var appsObserver: NSKeyValueObservation?
 
   public init() {}
 
@@ -27,20 +28,18 @@ public class EventBroker {
     started = true
     let nc = NSWorkspace.shared.notificationCenter
 
-    observers.append(
-      nc.addObserver(
-        forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
-      ) { [weak self] notification in
-        guard let self = self else { return }
-        guard
-          let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
-            as? NSRunningApplication,
-          app.activationPolicy == .regular
-        else { return }
-        let pid = app.processIdentifier
-        self.registerAppObserver(pid: pid)
-        self.onEvent?(.appLaunched(pid))
-      })
+    // KVO on runningApplications catches ALL process launches, including those
+    // spawned by background agents (e.g. RustDesk's secondary PID).
+    appsObserver = NSWorkspace.shared.observe(\.runningApplications, options: [.old, .new]) {
+      [weak self] _, change in
+      guard let self = self else { return }
+      let oldSet = Set(change.oldValue ?? [])
+      let newSet = Set(change.newValue ?? [])
+      for app in newSet.subtracting(oldSet) where app.activationPolicy == .regular {
+        self.registerAppObserver(pid: app.processIdentifier)
+        self.onEvent?(.appLaunched(app.processIdentifier))
+      }
+    }
 
     observers.append(
       nc.addObserver(
@@ -56,6 +55,21 @@ public class EventBroker {
         self.onEvent?(.appTerminated(pid))
       })
 
+    observers.append(
+      nc.addObserver(
+        forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+      ) { [weak self] notification in
+        guard let self = self else { return }
+        guard
+          let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+            as? NSRunningApplication,
+          app.activationPolicy == .regular
+        else { return }
+        // registerAppObserver is a no-op if already registered
+        self.registerAppObserver(pid: app.processIdentifier)
+        self.onEvent?(.appLaunched(app.processIdentifier))
+      })
+
     // Register for already-running apps
     for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
       registerAppObserver(pid: app.processIdentifier)
@@ -63,6 +77,7 @@ public class EventBroker {
   }
 
   public func stop() {
+    appsObserver = nil
     for obs in observers {
       NSWorkspace.shared.notificationCenter.removeObserver(obs)
     }
