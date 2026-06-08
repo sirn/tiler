@@ -300,7 +300,8 @@ public class WindowManager {
     windowStore.refresh(windowList: windowList, managedPIDs: managedPIDs)
 
     var tileableIDs: Set<CGWindowID> = []
-    var unresolvedCandidates: Set<CGWindowID> = []
+    var notTileableCandidates: Set<CGWindowID> = []
+    var noElementCandidates: Set<CGWindowID> = []
     var windowInfo: [CGWindowID: (pid: pid_t, title: String, bounds: NSRect)] = [:]
     var skippedNoElement = 0
     var skippedNotTileable = 0
@@ -326,12 +327,12 @@ public class WindowManager {
           tileableIDs.insert(wid)
         } else {
           skippedNotTileable += 1
-          unresolvedCandidates.insert(wid)
+          notTileableCandidates.insert(wid)
           tiler_debug("reconcile: skip not-tileable wid=\(wid) title='\(title)' pid=\(pid)")
         }
       } else {
         skippedNoElement += 1
-        unresolvedCandidates.insert(wid)
+        noElementCandidates.insert(wid)
         tiler_debug("reconcile: skip no-element wid=\(wid) title='\(title)' pid=\(pid)")
       }
     }
@@ -398,7 +399,8 @@ public class WindowManager {
       tileableIDs: tileableIDs,
       missingCounts: missingCounts,
       missThreshold: 2,
-      unresolvedIDs: unresolvedCandidates.subtracting(managedIDs),
+      unresolvedIDs: notTileableCandidates.subtracting(managedIDs),
+      noElementIDs: noElementCandidates.subtracting(managedIDs),
       resolveCounts: resolveCounts,
       resolveThreshold: 8)
     missingCounts = plan.updatedMissingCounts
@@ -524,7 +526,7 @@ public class WindowManager {
     // yet (or isn't tileable yet), schedule a delayed reconcile to re-check. The delay gives
     // the AX tree time to map the new window's element. Bounded by resolveThreshold so
     // permanently-unresolvable windows stop retrying after a fixed number of attempts.
-    if plan.hasPendingResolve {
+    if plan.hasPendingResolve || plan.hasPendingNoElementResolve {
       resolveRetryToken &+= 1
       let token = resolveRetryToken
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
