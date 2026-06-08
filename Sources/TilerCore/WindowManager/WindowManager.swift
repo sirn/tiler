@@ -62,7 +62,8 @@ public class WindowManager {
   private var resolveCounts: [CGWindowID: Int] = [:]
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
-  private var focusActivateToken: UInt64 = 0
+  private var reconcileGraceCycles: Int = 0
+
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -360,7 +361,15 @@ public class WindowManager {
           for window in column.windows {
             guard let element = windowStore.element(for: window.id),
               WindowFilter.isTileable(element)
-            else { continue }
+            else {
+              // A managed window that is still on-screen but lost its AX element
+              // mapping (transient axGetWindowID SPI failure in refresh()) is
+              // clearly alive — keep it to prevent premature reaping.
+              if onScreenIDs.contains(window.id) {
+                stillAlive.insert(window.id)
+              }
+              continue
+            }
             if onScreenIDs.contains(window.id) {
               stillAlive.insert(window.id)
               continue
@@ -392,6 +401,26 @@ public class WindowManager {
         .flatMap { $0.columns }
         .flatMap { $0.windows }
         .map { $0.id })
+
+    // Targeted position-resolve for windows whose AX element wasn't mapped by
+    // WindowStore (axGetWindowID SPI lag). Includes both new (unmanaged) windows whose
+    // AX element hasn't appeared yet, and managed windows that lost their mapping due
+    // to a transient axGetWindowID failure during refresh(). Position-matching is safe
+    // here because we match against unmapped AX windows only, with ambiguity detection.
+    for wid in noElementCandidates {
+      guard let info = windowInfo[wid] else { continue }
+      guard let element = windowStore.tryPositionResolve(pid: info.pid, cgBounds: info.bounds)
+      else { continue }
+      windowStore.register(wid: wid, element: element, pid: info.pid)
+      noElementCandidates.remove(wid)
+      if WindowFilter.isTileable(element) {
+        tileableIDs.insert(wid)
+        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
+      } else {
+        notTileableCandidates.insert(wid)
+        tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
+      }
+    }
 
     let plan = reconcilePlan(
       managedIDs: managedIDs,
@@ -516,20 +545,24 @@ public class WindowManager {
       state.screens[screenID] = screenState
     }
 
-    // If any window is on its first miss (not yet reaped), schedule another reconcile so
-    // a genuinely-closed window gets its second strike promptly.
+    // Update grace cycles: when we see new unresolved windows, extend the retry window.
+    // This gives time for transient backing windows to be replaced by real windows
+    // with valid AX element mappings.
+    if !noElementCandidates.isEmpty {
+      reconcileGraceCycles = 5
+    }
+
     if plan.hasPendingMiss {
       setNeedsReconcile()
     }
 
-    // Additions counterpart to the removal retry: when a candidate window has no AX element
-    // yet (or isn't tileable yet), schedule a delayed reconcile to re-check. The delay gives
-    // the AX tree time to map the new window's element. Bounded by resolveThreshold so
-    // permanently-unresolvable windows stop retrying after a fixed number of attempts.
-    if plan.hasPendingResolve || plan.hasPendingNoElementResolve {
+    if plan.hasPendingResolve || plan.hasPendingNoElementResolve || reconcileGraceCycles > 0 {
+      if !plan.hasPendingResolve && !plan.hasPendingNoElementResolve {
+        reconcileGraceCycles -= 1
+      }
       resolveRetryToken &+= 1
       let token = resolveRetryToken
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self = self, self.resolveRetryToken == token else { return }
         self.setNeedsReconcile()
       }
@@ -1112,7 +1145,8 @@ public class WindowManager {
       // activate the app and reconcile to repair the tile id.
       if let app = NSRunningApplication(processIdentifier: window.pid) {
         app.activate(options: [.activateIgnoringOtherApps])
-        verifyActivation(app: app)
+        app.activate(options: [.activateIgnoringOtherApps])
+
       }
       if let tileFrame = appliedWindows[window.groupKey]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
@@ -1127,12 +1161,17 @@ public class WindowManager {
       return
     }
 
-    // Move keyboard focus to the tile: raise it, mark it main, and activate the app.
-    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
+    // First set kAXMainAttribute so the window becomes key, then raise it to bring it
+    // to front. Some apps (Ghostty) need app.activate() called twice synchronously
+    // to yield keyboard focus — the first call syncs internal state, the second
+    // completes the transfer (AeroSpace pattern).
     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
-      verifyActivation(app: app)
+      app.activate(options: [.activateIgnoringOtherApps])
+
     }
     tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
 
@@ -1157,35 +1196,7 @@ public class WindowManager {
     }
   }
 
-  /// After activating an app, verify that focus actually transferred and retry if needed.
-  /// macOS does not guarantee that `app.activate()` will immediately transfer keyboard focus,
-  /// especially when another app holds an active CGEventTap (e.g., Ghostty). This polls the
-  /// frontmost application and retries activation up to 3 times with 100ms gaps.
-  private func verifyActivation(app: NSRunningApplication) {
-    focusActivateToken &+= 1
-    let token = focusActivateToken
-    tiler_debug("focus: scheduling activation verification for pid=\(app.processIdentifier)")
-    scheduleActivationVerify(app: app, token: token, retries: 0, maxRetries: 3)
-  }
 
-  private func scheduleActivationVerify(app: NSRunningApplication, token: UInt64, retries: Int, maxRetries: Int) {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-      guard let self = self, self.focusActivateToken == token else { return }
-
-      if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
-        tiler_debug("focus: activation verified for pid=\(app.processIdentifier)")
-        return
-      }
-
-      if retries < maxRetries {
-        tiler_debug("focus: activation retry \(retries + 1)/\(maxRetries) for pid=\(app.processIdentifier)")
-        app.activate(options: [.activateIgnoringOtherApps])
-        self.scheduleActivationVerify(app: app, token: token, retries: retries + 1, maxRetries: maxRetries)
-      } else {
-        tiler_debug("focus: activation failed after \(maxRetries) retries for pid=\(app.processIdentifier)")
-      }
-    }
-  }
 
   /// The currently-active tab window for a native tab group: the single on-screen
   /// CGWindowList window matching `tileFrame` for `pid` (background tabs are absent from
