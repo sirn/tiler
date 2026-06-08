@@ -81,10 +81,16 @@ public class WindowManager {
     }
   }
 
+  deinit {
+    stop()
+  }
+
   public func start() {
-    // Trigger initial reconcile to discover existing windows
     setNeedsReconcile()
     scheduleDrain()
+  }
+
+  public func stop() {
   }
 
   // MARK: - Coalescing drain
@@ -246,18 +252,13 @@ public class WindowManager {
       removeWindowsForPID(pid)
       setNeedsRetile()
     case .windowCreated(let element):
-      // Try to register the window directly from the AX notification element.
-      // This catches windows that appear in AX but never in CGWindowList.
       var pid: pid_t = 0
       AXUIElementGetPid(element, &pid)
       if let wid = windowStore.windowID(for: element),
          WindowFilter.isTileable(element) {
         windowStore.register(wid: wid, element: element, pid: pid)
-        addWindowToActiveWorkspace(windowID: wid, pid: pid, title: "")
-        setNeedsRetile()
-      } else {
-        setNeedsReconcile()
       }
+      setNeedsReconcile()
     case .windowDestroyed(let element):
       // Use the notification element directly to find the window ID.
       // CGWindowList can lag behind AX destruction, so we can't trust the
