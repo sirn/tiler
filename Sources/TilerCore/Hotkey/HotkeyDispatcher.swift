@@ -1,13 +1,29 @@
-import AppKit
+import Carbon
 import CoreGraphics
+import AppKit
 
 public class HotkeyDispatcher {
   public typealias ActionHandler = (Action) -> Void
 
-  private var tap: CFMachPort?
-  private var runLoopSource: CFRunLoopSource?
   private var bindings: [KeyCombo: Action] = [:]
-  private var handler: ActionHandler?
+  private var hotKeyRefs: [EventHotKeyRef] = []
+  private var eventHandler: EventHandlerRef?
+
+  fileprivate static let signature: FourCharCode = {
+    // Build "TILR" as a FourCharCode
+    let string = "TILR"
+    var result: FourCharCode = 0
+    for char in string.utf16 {
+      result = (result << 8) + FourCharCode(char)
+    }
+    return result
+  }()
+
+  // Static registry so the top-level C callback can look up actions and the handler.
+  // There is only ever one HotkeyDispatcher instance, so static storage is safe.
+  fileprivate static var actionMap: [UInt32: Action] = [:]
+  fileprivate static var nextID: UInt32 = 1
+  fileprivate static var actionHandler: ActionHandler?
 
   public init() {}
 
@@ -16,90 +32,131 @@ public class HotkeyDispatcher {
   }
 
   public func setActionHandler(_ handler: @escaping ActionHandler) {
-    self.handler = handler
+    Self.actionHandler = handler
   }
 
   /// Register keybindings from a mapping of parsed actions.
   public func setBindings(_ bindings: [KeyCombo: Action]) {
     self.bindings = bindings
+    // If we're already started, re-register with the new bindings
+    if eventHandler != nil {
+      stop()
+      start()
+    }
   }
 
-  /// Start the CGEventTap. Requires Input Monitoring permission (prompted automatically).
+  /// Start the Carbon hotkey event handler. Does NOT require Input Monitoring permission.
   public func start() {
-    guard tap == nil else { return }
+    guard eventHandler == nil else { return }
 
-    let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+    // Install one Carbon event handler for kEventHotKeyPressed
+    let eventSpec = [
+      EventTypeSpec(
+        eventClass: OSType(kEventClassKeyboard),
+        eventKind: UInt32(kEventHotKeyPressed)
+      ),
+    ]
 
-    guard
-      let tap = CGEvent.tapCreate(
-        tap: .cgSessionEventTap,
-        place: .headInsertEventTap,
-        options: .defaultTap,
-        eventsOfInterest: CGEventMask(eventMask),
-        callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
-          guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
-          let dispatcher = Unmanaged<HotkeyDispatcher>.fromOpaque(refcon).takeUnretainedValue()
-          return dispatcher.handleEvent(proxy: proxy, type: type, event: event)
-        },
-        userInfo: Unmanaged.passUnretained(self).toOpaque()
-      )
-    else {
-      tiler_log("Failed to create CGEventTap. Ensure Input Monitoring permission is granted.")
+    var handlerRef: EventHandlerRef?
+    let status = InstallEventHandler(
+      GetEventDispatcherTarget(),
+      hotkeyEventHandlerCallback,
+      eventSpec.count,
+      eventSpec,
+      nil,
+      &handlerRef
+    )
+    guard status == noErr, let handlerRef else {
+      tiler_log("Failed to install Carbon event handler (status \(status))")
       return
     }
+    eventHandler = handlerRef
 
-    self.tap = tap
-    let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-    self.runLoopSource = runLoopSource
-    CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+    // Register each binding as an EventHotKey
+    hotKeyRefs.removeAll()
+    for (combo, action) in bindings {
+      let keyCode = UInt32(combo.keyCode)
+      let modifiers = carbonModifiers(from: combo.modifiers)
+      let id = Self.nextID
+      Self.nextID &+= 1
+      Self.actionMap[id] = action
 
-    tiler_log("Hotkey dispatcher started with \(bindings.count) bindings")
+      let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
+      var ref: EventHotKeyRef?
+      let regStatus = RegisterEventHotKey(
+        keyCode,
+        modifiers,
+        hotKeyID,
+        GetEventDispatcherTarget(),
+        0,
+        &ref
+      )
+      if regStatus == noErr, let ref {
+        hotKeyRefs.append(ref)
+      } else {
+        tiler_log("Failed to register hotkey for keyCode \(keyCode), modifiers \(modifiers) (status \(regStatus))")
+      }
+    }
+
+    tiler_log("Hotkey dispatcher started with \(bindings.count) bindings (Carbon)")
   }
 
   public func stop() {
-    if let runLoopSource = runLoopSource {
-      CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+    if let eventHandler {
+      RemoveEventHandler(eventHandler)
+      self.eventHandler = nil
     }
-    if let tap = tap {
-      CFMachPortInvalidate(tap)
+    for ref in hotKeyRefs {
+      UnregisterEventHotKey(ref)
     }
-    self.tap = nil
-    self.runLoopSource = nil
+    hotKeyRefs.removeAll()
+    Self.actionMap.removeAll()
+    Self.nextID = 0
+  }
+}
+
+// MARK: - Carbon modifier conversion
+
+private func carbonModifiers(from flags: CGEventFlags) -> UInt32 {
+  var carbon: UInt32 = 0
+  if flags.contains(.maskCommand) { carbon |= UInt32(cmdKey) }      // 0x0100
+  if flags.contains(.maskShift) { carbon |= UInt32(shiftKey) }     // 0x0200
+  if flags.contains(.maskAlternate) { carbon |= UInt32(optionKey) }  // 0x0800
+  if flags.contains(.maskControl) { carbon |= UInt32(controlKey) }  // 0x1000
+  return carbon
+}
+
+// MARK: - C callback (top-level function, no captures)
+
+private func hotkeyEventHandlerCallback(
+  eventHandlerCall: EventHandlerCallRef?,
+  event: EventRef?,
+  userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+  guard let event else { return OSStatus(eventNotHandledErr) }
+
+  var hotKeyID = EventHotKeyID()
+  let err = GetEventParameter(
+    event,
+    UInt32(kEventParamDirectObject),
+    UInt32(typeEventHotKeyID),
+    nil,
+    MemoryLayout<EventHotKeyID>.size,
+    nil,
+    &hotKeyID
+  )
+  guard err == noErr else { return err }
+
+  guard hotKeyID.signature == HotkeyDispatcher.signature else {
+    return OSStatus(eventNotHandledErr)
   }
 
-  private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<
-    CGEvent
-  >? {
-    // Re-enable tap if it was disabled by the system
-    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-      if let tap = self.tap {
-        CGEvent.tapEnable(tap: tap, enable: true)
-      }
-      return Unmanaged.passUnretained(event)
+  if let action = HotkeyDispatcher.actionMap[hotKeyID.id] {
+    DispatchQueue.main.async {
+      HotkeyDispatcher.actionHandler?(action)
     }
-
-    guard type == .keyDown else {
-      return Unmanaged.passUnretained(event)
-    }
-
-    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-    let flags = event.flags
-
-    // Check if any binding matches
-    for (combo, action) in bindings {
-      if combo.keyCode == UInt16(keyCode)
-        && combo.modifiers
-          == flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
-      {
-        // Dispatch action on main queue
-        DispatchQueue.main.async {
-          self.handler?(action)
-        }
-        // Consume the event so it doesn't propagate to the active app
-        return nil
-      }
-    }
-
-    return Unmanaged.passUnretained(event)
+    return noErr
   }
+
+  return OSStatus(eventNotHandledErr)
 }
