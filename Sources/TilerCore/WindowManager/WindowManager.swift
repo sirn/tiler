@@ -35,6 +35,7 @@ public class WindowManager {
   private var needsReconcile = false
   private var needsRetile = false
   private var drainScheduled = false
+  private var reconcileTimer: Timer?
 
   // Convergence model:
   // Each retile bumps applyEpoch and records a desired frame per window in appliedWindows.
@@ -81,10 +82,26 @@ public class WindowManager {
     }
   }
 
+  deinit {
+    stop()
+  }
+
   public func start() {
-    // Trigger initial reconcile to discover existing windows
     setNeedsReconcile()
     scheduleDrain()
+    startPeriodicReconcile()
+  }
+
+  public func stop() {
+    reconcileTimer?.invalidate()
+    reconcileTimer = nil
+  }
+
+  private func startPeriodicReconcile() {
+    reconcileTimer?.invalidate()
+    reconcileTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+      self?.setNeedsReconcile()
+    }
   }
 
   // MARK: - Coalescing drain
