@@ -50,14 +50,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       statusBar?.update(occupied: indicator.occupied, current: indicator.current)
     }
 
+    // Start event listening (before reconcile so AX observers are registered)
+    broker.start()
+
     // Reconcile existing windows (enumerate + diff against empty state)
     wm.reconcile()
 
     // Start the coalescing drain loop
     wm.start()
-
-    // Start event listening
-    broker.start()
 
     // Set up hotkey dispatcher
     let dispatcher = HotkeyDispatcher()
