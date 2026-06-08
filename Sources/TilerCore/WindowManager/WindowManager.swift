@@ -393,6 +393,24 @@ public class WindowManager {
         .flatMap { $0.windows }
         .map { $0.id })
 
+    // Targeted one-time position resolve for new unmanaged windows whose AX element
+    // wasn't mapped by WindowStore (axGetWindowID SPI lag). Only affects windows not
+    // yet managed, so existing identity mappings are never disturbed.
+    for wid in noElementCandidates.subtracting(managedIDs) {
+      guard let info = windowInfo[wid] else { continue }
+      guard let element = windowStore.tryPositionResolve(pid: info.pid, cgBounds: info.bounds)
+      else { continue }
+      windowStore.register(wid: wid, element: element, pid: info.pid)
+      noElementCandidates.remove(wid)
+      if WindowFilter.isTileable(element) {
+        tileableIDs.insert(wid)
+        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
+      } else {
+        notTileableCandidates.insert(wid)
+        tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
+      }
+    }
+
     let plan = reconcilePlan(
       managedIDs: managedIDs,
       stillAliveIDs: stillAlive,
@@ -1112,7 +1130,7 @@ public class WindowManager {
       // activate the app and reconcile to repair the tile id.
       if let app = NSRunningApplication(processIdentifier: window.pid) {
         app.activate(options: [.activateIgnoringOtherApps])
-        verifyActivation(app: app)
+        verifyActivation(app: app, windowFrame: appliedWindows[window.groupKey]?.frame)
       }
       if let tileFrame = appliedWindows[window.groupKey]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
@@ -1132,7 +1150,7 @@ public class WindowManager {
     AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
-      verifyActivation(app: app)
+      verifyActivation(app: app, windowFrame: appliedWindows[window.groupKey]?.frame)
     }
     tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
 
@@ -1161,14 +1179,14 @@ public class WindowManager {
   /// macOS does not guarantee that `app.activate()` will immediately transfer keyboard focus,
   /// especially when another app holds an active CGEventTap (e.g., Ghostty). This polls the
   /// frontmost application and retries activation up to 3 times with 100ms gaps.
-  private func verifyActivation(app: NSRunningApplication) {
+  private func verifyActivation(app: NSRunningApplication, windowFrame: NSRect? = nil) {
     focusActivateToken &+= 1
     let token = focusActivateToken
     tiler_debug("focus: scheduling activation verification for pid=\(app.processIdentifier)")
-    scheduleActivationVerify(app: app, token: token, retries: 0, maxRetries: 3)
+    scheduleActivationVerify(app: app, token: token, retries: 0, maxRetries: 3, windowFrame: windowFrame)
   }
 
-  private func scheduleActivationVerify(app: NSRunningApplication, token: UInt64, retries: Int, maxRetries: Int) {
+  private func scheduleActivationVerify(app: NSRunningApplication, token: UInt64, retries: Int, maxRetries: Int, windowFrame: NSRect?) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
       guard let self = self, self.focusActivateToken == token else { return }
 
@@ -1180,7 +1198,17 @@ public class WindowManager {
       if retries < maxRetries {
         tiler_debug("focus: activation retry \(retries + 1)/\(maxRetries) for pid=\(app.processIdentifier)")
         app.activate(options: [.activateIgnoringOtherApps])
-        self.scheduleActivationVerify(app: app, token: token, retries: retries + 1, maxRetries: maxRetries)
+        if let frame = windowFrame {
+          let center = CGPoint(x: frame.midX, y: frame.midY)
+          if let downEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                      mouseCursorPosition: center, mouseButton: .left),
+             let upEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                    mouseCursorPosition: center, mouseButton: .left) {
+            downEvent.post(tap: .cghidEventTap)
+            upEvent.post(tap: .cghidEventTap)
+          }
+        }
+        self.scheduleActivationVerify(app: app, token: token, retries: retries + 1, maxRetries: maxRetries, windowFrame: windowFrame)
       } else {
         tiler_debug("focus: activation failed after \(maxRetries) retries for pid=\(app.processIdentifier)")
       }

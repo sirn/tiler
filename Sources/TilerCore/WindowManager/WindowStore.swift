@@ -207,6 +207,63 @@ public final class WindowStore {
     return elements[id]
   }
 
+  /// Register a window mapping established outside of refresh() (e.g. position-resolved).
+  public func register(wid: CGWindowID, element: AXUIElement, pid: pid_t) {
+    elements[wid] = element
+    pidWindows[pid, default: []].insert(wid)
+  }
+
+  /// Find an unmapped AX window for `pid` whose on-screen position matches `cgBounds`.
+  /// Only considers AX windows not already in the store. Returns nil if the match is
+  /// ambiguous (zero or multiple candidates within tolerance), avoiding identity swap risk.
+  public func tryPositionResolve(pid: pid_t, cgBounds: NSRect) -> AXUIElement? {
+    let appElement = AXUIElementCreateApplication(pid)
+    var windowsRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        == .success,
+      let axWindows = windowsRef as? [AXUIElement]
+    else { return nil }
+
+    // Filter to AX windows not already in the store. An element IS in the store if
+    // axGetWindowID returns a known wid, or if it's pointer-equal to a stored element.
+    let storedElements = Set(elements.values.map { ObjectIdentifier($0) })
+    let unmapped = axWindows.filter { axWin in
+      if let wid = axGetWindowID(axWin), elements[wid] != nil { return false }
+      if storedElements.contains(ObjectIdentifier(axWin)) { return false }
+      return true
+    }
+
+    var matched: AXUIElement?
+    for axWin in unmapped {
+      var posRef: CFTypeRef?
+      var sizeRef: CFTypeRef?
+      guard
+        AXUIElementCopyAttributeValue(axWin, kAXPositionAttribute as CFString, &posRef) == .success,
+        AXUIElementCopyAttributeValue(axWin, kAXSizeAttribute as CFString, &sizeRef) == .success,
+        CFGetTypeID(posRef) == AXValueGetTypeID(),
+        CFGetTypeID(sizeRef) == AXValueGetTypeID()
+      else { continue }
+
+      let posAX = unsafeBitCast(posRef!, to: AXValue.self)
+      let sizeAX = unsafeBitCast(sizeRef!, to: AXValue.self)
+      var axPoint = CGPoint.zero
+      var axSize = CGSize.zero
+      guard AXValueGetValue(posAX, .cgPoint, &axPoint),
+        AXValueGetValue(sizeAX, .cgSize, &axSize)
+      else { continue }
+
+      let distance = abs(axPoint.x - cgBounds.minX) + abs(axPoint.y - cgBounds.minY)
+        + abs(axSize.width - cgBounds.width) + abs(axSize.height - cgBounds.height)
+      guard distance < 20 else { continue }
+
+      // Ambiguous — more than one candidate at this position
+      guard matched == nil else { return nil }
+      matched = axWin
+    }
+    return matched
+  }
+
   /// Resolve the AXUIElement for a specific (pid, wid) by scanning the app's current AX
   /// windows. Used when the cached map may be stale, e.g. just after a native tab switch.
   public func liveElement(forPID pid: pid_t, wid: CGWindowID) -> AXUIElement? {
