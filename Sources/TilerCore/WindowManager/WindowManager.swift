@@ -81,10 +81,16 @@ public class WindowManager {
     }
   }
 
+  deinit {
+    stop()
+  }
+
   public func start() {
-    // Trigger initial reconcile to discover existing windows
     setNeedsReconcile()
     scheduleDrain()
+  }
+
+  public func stop() {
   }
 
   // MARK: - Coalescing drain
@@ -255,6 +261,7 @@ public class WindowManager {
         windowStore.register(wid: wid, element: element, pid: pid)
         addWindowToActiveWorkspace(windowID: wid, pid: pid, title: "")
         setNeedsRetile()
+        setNeedsReconcile()
       } else {
         setNeedsReconcile()
       }
