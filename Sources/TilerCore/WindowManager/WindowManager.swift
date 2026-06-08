@@ -64,7 +64,6 @@ public class WindowManager {
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
 
-
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
     self.gaps = GapConfig(
@@ -1205,7 +1204,6 @@ public class WindowManager {
       if let app = NSRunningApplication(processIdentifier: window.pid) {
         app.activate(options: [.activateIgnoringOtherApps])
         app.activate(options: [.activateIgnoringOtherApps])
-
       }
       if let tileFrame = appliedWindows[window.groupKey]?.frame,
         let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
@@ -1254,8 +1252,6 @@ public class WindowManager {
       }
     }
   }
-
-
 
   /// The currently-active tab window for a native tab group: the single on-screen
   /// CGWindowList window matching `tileFrame` for `pid` (background tabs are absent from

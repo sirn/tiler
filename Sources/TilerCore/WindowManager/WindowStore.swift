@@ -18,7 +18,6 @@ public final class WindowStore {
     else {
       return
     }
-
     elements.removeAll(keepingCapacity: true)
     pidWindows.removeAll(keepingCapacity: true)
 
@@ -201,7 +200,6 @@ public final class WindowStore {
         }
       }
     }
-
   }
 
   /// Get the AXUIElement for a CGWindowID.
