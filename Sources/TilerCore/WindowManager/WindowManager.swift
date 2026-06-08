@@ -81,10 +81,16 @@ public class WindowManager {
     }
   }
 
+  deinit {
+    stop()
+  }
+
   public func start() {
-    // Trigger initial reconcile to discover existing windows
     setNeedsReconcile()
     scheduleDrain()
+  }
+
+  public func stop() {
   }
 
   // MARK: - Coalescing drain
@@ -246,18 +252,13 @@ public class WindowManager {
       removeWindowsForPID(pid)
       setNeedsRetile()
     case .windowCreated(let element):
-      // Try to register the window directly from the AX notification element.
-      // This catches windows that appear in AX but never in CGWindowList.
       var pid: pid_t = 0
       AXUIElementGetPid(element, &pid)
       if let wid = windowStore.windowID(for: element),
          WindowFilter.isTileable(element) {
         windowStore.register(wid: wid, element: element, pid: pid)
-        addWindowToActiveWorkspace(windowID: wid, pid: pid, title: "")
-        setNeedsRetile()
-      } else {
-        setNeedsReconcile()
       }
+      setNeedsReconcile()
     case .windowDestroyed(let element):
       // Use the notification element directly to find the window ID.
       // CGWindowList can lag behind AX destruction, so we can't trust the
@@ -823,304 +824,53 @@ public class WindowManager {
   // MARK: - Action handling
 
   public func handleAction(_ action: Action) {
-    switch action {
-
-    case .focusColumnLeft:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        workspace.focusedColumnIndex > 0
-      else { return }
-      workspace.focusedColumnIndex -= 1
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      focusFocusedWindow(in: workspace)
-      setNeedsRetile()
-
-    case .focusColumnRight:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        workspace.focusedColumnIndex < workspace.columns.count - 1
-      else { return }
-      workspace.focusedColumnIndex += 1
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      focusFocusedWindow(in: workspace)
-      setNeedsRetile()
-
-    case .moveColumnLeft:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        workspace.focusedColumnIndex > 0
-      else { return }
-      let idx = workspace.focusedColumnIndex
-      workspace.columns.swapAt(idx, idx - 1)
-      workspace.focusedColumnIndex -= 1
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .moveColumnRight:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        workspace.focusedColumnIndex < workspace.columns.count - 1
-      else { return }
-      let idx = workspace.focusedColumnIndex
-      workspace.columns.swapAt(idx, idx + 1)
-      workspace.focusedColumnIndex += 1
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .focusWindowUp:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex > 0 else { return }
-      col.focusedWindowIndex -= 1
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      focusFocusedWindow(in: workspace)
-      setNeedsRetile()
-
-    case .focusWindowDown:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex < col.windows.count - 1 else { return }
-      col.focusedWindowIndex += 1
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      focusFocusedWindow(in: workspace)
-      setNeedsRetile()
-
-    case .moveWindowUp:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex > 0 else { return }
-      let idx = col.focusedWindowIndex
-      col.windows.swapAt(idx, idx - 1)
-      col.focusedWindowIndex -= 1
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .moveWindowDown:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex < col.windows.count - 1 else { return }
-      let idx = col.focusedWindowIndex
-      col.windows.swapAt(idx, idx + 1)
-      col.focusedWindowIndex += 1
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .focusWorkspace(let n):
-      guard (1...workspaceCount).contains(n) else { return }
-      guard let screenID = activeScreenID(),
-        var screenState = state.screens[screenID]
-      else { return }
-      let oldWSID = screenState.activeWorkspaceID
-      guard oldWSID != n else { return }
-      screenState.activeWorkspaceID = n
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-      if let newWorkspace = screenState.workspaces[n] {
-        focusFocusedWindow(in: newWorkspace)
-      }
-      tiler_log("Switched to workspace \(n)")
-
-    case .moveToWorkspace(let n):
-      guard (1...workspaceCount).contains(n) else { return }
-      guard let screenID = activeScreenID(),
-        var screenState = state.screens[screenID]
-      else { return }
-      let currentWSID = screenState.activeWorkspaceID
-      guard currentWSID != n else { return }
-      guard var sourceWorkspace = screenState.workspaces[currentWSID],
-        !sourceWorkspace.columns.isEmpty
-      else { return }
-
-      let colIdx = sourceWorkspace.focusedColumnIndex
-      guard colIdx < sourceWorkspace.columns.count else { return }
-      var col = sourceWorkspace.columns[colIdx]
-      let winIdx = col.focusedWindowIndex
-      guard winIdx < col.windows.count else { return }
-
-      // Remove the focused window from the source column
-      let window = col.windows.remove(at: winIdx)
-
-      // Update source column after removal
-      if col.windows.isEmpty {
-        sourceWorkspace.columns.remove(at: colIdx)
-        if sourceWorkspace.focusedColumnIndex >= sourceWorkspace.columns.count
-          && !sourceWorkspace.columns.isEmpty
-        {
-          sourceWorkspace.focusedColumnIndex = sourceWorkspace.columns.count - 1
-        }
-      } else {
-        if col.focusedWindowIndex >= col.windows.count {
-          col.focusedWindowIndex = col.windows.count - 1
-        }
-        sourceWorkspace.columns[colIdx] = col
-      }
-      screenState.workspaces[currentWSID] = sourceWorkspace
-
-      // Add the window to the target workspace
-      guard var targetWorkspace = screenState.workspaces[n] else { return }
-      let newCol = Column(
-        windows: [window], focusedWindowIndex: 0, widthFraction: layoutConfig.defaultColumnWidth)
-      if targetWorkspace.columns.isEmpty {
-        targetWorkspace.columns = [newCol]
-        targetWorkspace.focusedColumnIndex = 0
-      } else {
-        let insertAt = min(targetWorkspace.focusedColumnIndex + 1, targetWorkspace.columns.count)
-        targetWorkspace.columns.insert(newCol, at: insertAt)
-        targetWorkspace.focusedColumnIndex = insertAt
-      }
-      screenState.workspaces[n] = targetWorkspace
-      state.screens[screenID] = screenState
-
-      setNeedsRetile()
-      tiler_log("Moved window to workspace \(n)")
-
-    case .increaseColumnWidth:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      col.widthFraction = min(col.widthFraction + 0.05, 0.8)
-      // User explicitly chose width — clear any auto-absorbed minimum
-      col.measuredMinWidth = nil
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .decreaseColumnWidth:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      col.widthFraction = max(col.widthFraction - 0.05, 0.2)
-      // User explicitly chose width — clear any auto-absorbed minimum
-      col.measuredMinWidth = nil
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .toggleColumnTabbed:
-      guard let screenID = activeScreenID(),
-        let wsID = activeWorkspaceID(),
-        var screenState = state.screens[screenID],
-        var workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      var col = workspace.columns[workspace.focusedColumnIndex]
-      col.mode = (col.mode == .stack) ? .tab : .stack
-      workspace.columns[workspace.focusedColumnIndex] = col
-      screenState.workspaces[wsID] = workspace
-      state.screens[screenID] = screenState
-      setNeedsRetile()
-
-    case .closeWindow:
-      guard let wsID = activeWorkspaceID(),
-        let screenID = activeScreenID(),
-        let screenState = state.screens[screenID],
-        let workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      let col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex < col.windows.count else { return }
-      let window = col.windows[col.focusedWindowIndex]
-      guard let element = windowStore.element(for: window.id) else { return }
-      var closeButton: CFTypeRef?
-      AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &closeButton)
-      if let btn = closeButton {
-        AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
-      }
-    // Window removal will be handled by the .windowDestroyed event
-
-    case .toggleFullscreen:
-      guard let wsID = activeWorkspaceID(),
-        let screenID = activeScreenID(),
-        let screenState = state.screens[screenID],
-        let workspace = screenState.workspaces[wsID],
-        !workspace.columns.isEmpty
-      else { return }
-      let col = workspace.columns[workspace.focusedColumnIndex]
-      guard col.focusedWindowIndex < col.windows.count else { return }
-      let window = col.windows[col.focusedWindowIndex]
-      guard let element = windowStore.element(for: window.id) else { return }
-      var fullscreen: CFTypeRef?
-      let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullscreen)
-      if result == .success, let isFullscreen = fullscreen as? Bool {
-        AXUIElementSetAttributeValue(
-          element, "AXFullScreen" as CFString, !isFullscreen as CFTypeRef)
-        tiler_log("Toggled fullscreen on window \(window.id)")
-      }
-
-    case .consumeOrExpelLeft:
-      consumeOrExpelFocused(.left)
-    case .consumeOrExpelRight:
-      consumeOrExpelFocused(.right)
-    }
+    let effects = Reducer.apply(action, to: &state, env: computeEnv())
+    runEffects(effects)
   }
 
-  private func consumeOrExpelFocused(_ direction: HorizontalDirection) {
-    guard let screenID = activeScreenID(), let wsID = activeWorkspaceID(),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else { return }
-    guard let result = consumeOrExpel(
-      columns: workspace.columns,
-      focusedColumnIndex: workspace.focusedColumnIndex,
-      direction: direction)
-    else { return }
-    workspace.columns = result.columns
-    workspace.focusedColumnIndex = result.focusedColumnIndex
-    screenState.workspaces[wsID] = workspace
-    state.screens[screenID] = screenState
-    refreshActiveTabs(screenID: screenID, wsID: wsID)
-    scheduleDeferredTabRefresh(screenID: screenID, wsID: wsID)
-    setNeedsRetile()
+
+  private func computeEnv() -> ReducerEnv {
+    ReducerEnv(
+      workspaceCount: workspaceCount,
+      defaultColumnWidth: layoutConfig.defaultColumnWidth,
+      activeScreenID: activeScreenID()
+    )
+  }
+  private func runEffects(_ effects: [Effect]) {
+    for effect in effects {
+      switch effect {
+      case .retile:
+        setNeedsRetile()
+      case .focusFocusedWindow(let screenID, let wsID):
+        guard let screenState = state.screens[screenID],
+              let workspace = screenState.workspaces[wsID]
+        else { break }
+        focusFocusedWindow(in: workspace)
+      case .closeWindow(let windowID):
+        guard let element = windowStore.element(for: windowID) else { break }
+        var closeButton: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &closeButton)
+        if let btn = closeButton {
+          AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
+        }
+      case .toggleFullscreen(let windowID):
+        guard let element = windowStore.element(for: windowID) else { break }
+        var fullscreen: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullscreen)
+        if result == .success, let isFullscreen = fullscreen as? Bool {
+          AXUIElementSetAttributeValue(
+            element, "AXFullScreen" as CFString, !isFullscreen as CFTypeRef)
+          tiler_log("Toggled fullscreen on window \(windowID)")
+        }
+      case .refreshTabs(let screenID, let wsID):
+        refreshActiveTabs(screenID: screenID, wsID: wsID)
+      case .scheduleDeferredTabRefresh(let screenID, let wsID):
+        scheduleDeferredTabRefresh(screenID: screenID, wsID: wsID)
+
+      case .log(let message):
+        tiler_log(message)
+      }
+    }
   }
 
   /// Refresh every tile in the workspace to its native-tab group's live active tab.
