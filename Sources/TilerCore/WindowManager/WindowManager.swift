@@ -66,6 +66,7 @@ public class WindowManager {
   private let statePersistence = StatePersistence()
   private var needsSave = false
   private var reconcileTimer: Timer?
+  private var screenChangeObserver: NSObjectProtocol?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -94,11 +95,19 @@ public class WindowManager {
     reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
       self?.setNeedsReconcile()
     }
+    screenChangeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil, queue: .main
+    ) { [weak self] _ in self?.reconfigureScreens() }
   }
 
   public func stop() {
     reconcileTimer?.invalidate()
     reconcileTimer = nil
+    if let obs = screenChangeObserver {
+      NotificationCenter.default.removeObserver(obs)
+      screenChangeObserver = nil
+    }
   }
 
   // MARK: - Coalescing drain
@@ -125,7 +134,7 @@ public class WindowManager {
     drainScheduled = false
     if needsRetile {
       needsRetile = false
-      retileActiveWorkspace()
+      retileAllScreens()
       hideInactiveWorkspaces()
     }
     if needsReconcile {
@@ -757,6 +766,22 @@ public class WindowManager {
     return state.screens.keys.first ?? CGMainDisplayID()
   }
 
+  private func orderedScreenIDs() -> [ScreenID] {
+    state.screens.keys.sorted {
+      (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
+      (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+    }
+  }
+
+  private func screenID(for bounds: NSRect) -> ScreenID? {
+    let mid = NSPoint(x: bounds.midX, y: bounds.midY)
+    for (id, ss) in state.screens where ss.info.visibleFrame.contains(mid) {
+      return id
+    }
+    return activeScreenID()
+  }
+
+
   public func activeWorkspaceID() -> WorkspaceID? {
     guard let screenID = activeScreenID() else { return nil }
     return state.screens[screenID]?.activeWorkspaceID
@@ -770,11 +795,12 @@ public class WindowManager {
   }
 
   private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String, bounds: NSRect) {
-    guard let screenID = activeScreenID(),
-      let wsID = activeWorkspaceID(),
+    guard let screenID = screenID(for: bounds),
       var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
+      var workspace = screenState.workspaces[screenState.activeWorkspaceID]
     else { return }
+
+    let wsID = screenState.activeWorkspaceID
 
     let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
 
@@ -929,7 +955,8 @@ public class WindowManager {
     ReducerEnv(
       workspaceCount: workspaceCount,
       defaultColumnWidth: layoutConfig.defaultColumnWidth,
-      activeScreenID: activeScreenID()
+      activeScreenID: activeScreenID(),
+      orderedScreenIDs: orderedScreenIDs()
     )
   }
   private func runEffects(_ effects: [Effect]) {
@@ -1228,30 +1255,29 @@ public class WindowManager {
 
   // MARK: - Layout
 
-  private func retileActiveWorkspace() {
-    guard let wsID = activeWorkspaceID(),
-      let screenID = activeScreenID(),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else {
-      return
-    }
-    let context = LayoutContext(screen: screenState.info, gaps: gaps)
-    let output = LayoutResolver.resolve(workspace, context)
-    workspace.scrollOffset = output.offset
-    screenState.workspaces[wsID] = workspace
-    state.screens[screenID] = screenState
+  private func retileAllScreens() {
     applyEpoch &+= 1
-    for column in workspace.columns {
-      for node in column.windows {
-        if let frame = output.frames[node.id] {
-          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
+    var allFrames: [CGWindowID: NSRect] = [:]
+    for (screenID, var screenState) in state.screens {
+      let wsID = screenState.activeWorkspaceID
+      guard var workspace = screenState.workspaces[wsID] else { continue }
+      let context = LayoutContext(screen: screenState.info, gaps: gaps)
+      let output = LayoutResolver.resolve(workspace, context)
+      workspace.scrollOffset = output.offset
+      screenState.workspaces[wsID] = workspace
+      state.screens[screenID] = screenState
+      for column in workspace.columns {
+        for node in column.windows {
+          if let frame = output.frames[node.id] {
+            appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
+          }
         }
       }
+      allFrames.merge(output.frames) { _, new in new }
     }
-    AXWindowBridge.applyFrames(output.frames, store: windowStore)
-    if !output.frames.isEmpty {
-      tiler_debug("Laid out \(output.frames.count) windows on workspace \(wsID)")
+    AXWindowBridge.applyFrames(allFrames, store: windowStore)
+    if !allFrames.isEmpty {
+      tiler_debug("Laid out \(allFrames.count) windows across \(state.screens.count) screens")
     }
   }
 
@@ -1260,15 +1286,12 @@ public class WindowManager {
   /// Re-issue frames for windows that haven't reached their desired geometry yet.
   /// Runs once per drain cycle; convergence is driven by incoming AX resize notifications.
   private func reconcilePendingFrames() {
-    guard let wsID = activeWorkspaceID(),
-      let screenID = activeScreenID(),
-      let screenState = state.screens[screenID],
-      let workspace = screenState.workspaces[wsID]
-    else { return }
-
     var idForGroup: [WindowNode.GroupKey: CGWindowID] = [:]
-    for column in workspace.columns {
-      for node in column.windows { idForGroup[node.groupKey] = node.id }
+    for (_, screenState) in state.screens {
+      guard let workspace = screenState.workspaces[screenState.activeWorkspaceID] else { continue }
+      for column in workspace.columns {
+        for node in column.windows { idForGroup[node.groupKey] = node.id }
+      }
     }
 
     for (gk, record) in appliedWindows where record.epoch == applyEpoch && idForGroup[gk] != nil {
@@ -1304,22 +1327,48 @@ public class WindowManager {
 
   /// Record that a window resisted being narrower than observedWidth, and retile to accommodate.
   private func absorbMinWidth(wid: CGWindowID, observedWidth: CGFloat) {
-    guard let screenID = activeScreenID(),
-      let wsID = activeWorkspaceID(),
-      var screenState = state.screens[screenID],
-      var workspace = screenState.workspaces[wsID]
-    else { return }
-
-    for colIdx in workspace.columns.indices {
-      if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
-        workspace.columns[colIdx].measuredMinWidth = max(
-          workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
-        screenState.workspaces[wsID] = workspace
-        state.screens[screenID] = screenState
-        setNeedsRetile()
-        tiler_debug("Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx)")
-        return
+    for (screenID, var screenState) in state.screens {
+      let wsID = screenState.activeWorkspaceID
+      guard var workspace = screenState.workspaces[wsID] else { continue }
+      for colIdx in workspace.columns.indices {
+        if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          workspace.columns[colIdx].measuredMinWidth = max(
+            workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
+          screenState.workspaces[wsID] = workspace
+          state.screens[screenID] = screenState
+          setNeedsRetile()
+          tiler_debug("Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx) on screen \(screenID)")
+          return
+        }
       }
     }
+  }
+
+  private func reconfigureScreens() {
+    let current = NSScreen.screens
+    let currentIDs = Set(current.compactMap { $0.displayID })
+
+    for screen in current {
+      guard let id = screen.displayID, state.screens[id] != nil else { continue }
+      state.screens[id]?.info = ScreenInfo(
+        id: id, frame: screen.frame, visibleFrame: screen.visibleFrame)
+    }
+
+    for id in Set(state.screens.keys).subtracting(currentIDs) {
+      state.screens.removeValue(forKey: id)
+      tiler_log("Display removed: \(id)")
+    }
+
+    for screen in current {
+      guard let id = screen.displayID, state.screens[id] == nil else { continue }
+      let info = ScreenInfo(id: id, frame: screen.frame, visibleFrame: screen.visibleFrame)
+      var workspaces: [WorkspaceID: Workspace] = [:]
+      for i in 1...workspaceCount { workspaces[i] = Workspace(id: i) }
+      state.screens[id] = ScreenState(info: info, workspaces: workspaces, activeWorkspaceID: 1)
+      tiler_log("Display added: \(id)")
+    }
+
+    setNeedsReconcile()
+    setNeedsRetile()
   }
 }

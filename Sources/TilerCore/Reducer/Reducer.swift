@@ -25,17 +25,49 @@ enum Reducer {
   ) -> [Effect] {
     switch action {
     case .focusColumnLeft:
+    if let screenID = env.activeScreenID,
+       let ss = state.screens[screenID],
+       let currentWS = ss.workspaces[ss.activeWorkspaceID],
+       !currentWS.columns.isEmpty,
+       currentWS.focusedColumnIndex == 0,
+         let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
+         env.orderedScreenIDs.count > 1 {
+          let prevID = env.orderedScreenIDs[(currentIdx - 1 + env.orderedScreenIDs.count) % env.orderedScreenIDs.count]
+          return state.withScreen(prevID) { prevID, prevScreen in
+              let wsID = prevScreen.activeWorkspaceID
+              guard var ws = prevScreen.workspaces[wsID], !ws.columns.isEmpty else { return [] }
+            ws.focusedColumnIndex = ws.columns.count - 1
+              prevScreen.workspaces[wsID] = ws
+              return [.focusFocusedWindow(prevID, wsID), .retile]
+          }
+      }
       return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
-        guard ws.focusedColumnIndex > 0 else { return [] }
-        ws.focusedColumnIndex -= 1
-        return [.focusFocusedWindow(screenID, wsID), .retile]
+          guard ws.focusedColumnIndex > 0 else { return [] }
+          ws.focusedColumnIndex -= 1
+          return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .focusColumnRight:
+      if let screenID = env.activeScreenID,
+         let ss = state.screens[screenID],
+       let ws = ss.workspaces[ss.activeWorkspaceID],
+       !ws.columns.isEmpty,
+       ws.focusedColumnIndex >= ws.columns.count - 1,
+         let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
+         env.orderedScreenIDs.count > 1 {
+          let nextID = env.orderedScreenIDs[(currentIdx + 1) % env.orderedScreenIDs.count]
+          return state.withScreen(nextID) { nextID, nextScreen in
+              let wsID = nextScreen.activeWorkspaceID
+              guard var ws = nextScreen.workspaces[wsID], !ws.columns.isEmpty else { return [] }
+              ws.focusedColumnIndex = 0
+              nextScreen.workspaces[wsID] = ws
+              return [.focusFocusedWindow(nextID, wsID), .retile]
+          }
+      }
       return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
-        guard ws.focusedColumnIndex < ws.columns.count - 1 else { return [] }
-        ws.focusedColumnIndex += 1
-        return [.focusFocusedWindow(screenID, wsID), .retile]
+          guard ws.focusedColumnIndex < ws.columns.count - 1 else { return [] }
+          ws.focusedColumnIndex += 1
+          return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .moveColumnLeft:
