@@ -11,6 +11,15 @@ extension TilerState {
     screens[screenID] = screenState
     return effects
   }
+  mutating func withScreen(
+    _ screenID: ScreenID,
+    _ body: (ScreenID, inout ScreenState) -> [Effect]
+  ) -> [Effect] {
+    guard var screenState = screens[screenID] else { return [] }
+    let effects = body(screenID, &screenState)
+    screens[screenID] = screenState
+    return effects
+  }
 
   mutating func withActiveWorkspace(
     env: ReducerEnv,
