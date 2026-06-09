@@ -127,9 +127,9 @@ final class ViewportCalcTests: XCTestCase {
   // whose right edge exceeds the usable area (no spill regardless of which column
   // is focused or what the starting offset is).
   func testLayoutNoWindowSpill() {
-    let win0 = WindowNode(id: 1, groupKey: GroupKey(value: 1), pid: 1, title: "w0")
-    let win1 = WindowNode(id: 2, groupKey: GroupKey(value: 2), pid: 1, title: "w1")
-    let win2 = WindowNode(id: 3, groupKey: GroupKey(value: 3), pid: 1, title: "w2")
+    let win0 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w0")
+    let win1 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w1")
+    let win2 = WindowNode(id: 3, groupKey: WindowNode.GroupKey(value: 3), pid: 1, title: "w2")
     let ws = Workspace(
       id: 1,
       columns: [

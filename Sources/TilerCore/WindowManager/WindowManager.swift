@@ -52,11 +52,11 @@ public class WindowManager {
   }
   private var applyEpoch: UInt64 = 0
   private var nextGroupToken: UInt64 = 0
-  private func mintGroupKey() -> GroupKey {
+  private func mintGroupKey() -> WindowNode.GroupKey {
     nextGroupToken &+= 1
-    return GroupKey(value: nextGroupToken)
+    return WindowNode.GroupKey(value: nextGroupToken)
   }
-  private var appliedWindows: [GroupKey: AppliedWindow] = [:]
+  private var appliedWindows: [WindowNode.GroupKey: AppliedWindow] = [:]
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
@@ -233,7 +233,7 @@ public class WindowManager {
         for persistedCol in persistedWS.columns {
           let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
           guard !liveWindows.isEmpty else { continue }
-          let mode: ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
+          let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
           let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
           restoredColumns.append(Column(
             windows: liveWindows,
@@ -800,16 +800,7 @@ public class WindowManager {
   /// Replace a managed window's id in-place (for native-tab active-window changes).
   /// The new node keeps the old node's position within its column.
   private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
-    for (screenID, var screenState) in state.screens {
-      for (wsID, var workspace) in screenState.workspaces {
-        if let newColumns = swapBackingID(in: workspace.columns, from: oldID, to: newID, title: title) {
-          workspace.columns = newColumns
-          screenState.workspaces[wsID] = workspace
-          state.screens[screenID] = screenState
-          return
-        }
-      }
-    }
+    state.swapWindowID(from: oldID, to: newID, title: title)
   }
 
   private func removeWindow(windowID: CGWindowID) {
@@ -895,7 +886,7 @@ public class WindowManager {
   }
 
   /// The stable groupKey of the tile currently backed by `wid`, or nil if `wid` isn't a tile.
-  private func groupKey(forID wid: CGWindowID) -> GroupKey? {
+  private func groupKey(forID wid: CGWindowID) -> WindowNode.GroupKey? {
     for screenState in state.screens.values {
       for workspace in screenState.workspaces.values {
         for column in workspace.columns {
@@ -1268,7 +1259,7 @@ public class WindowManager {
       let workspace = screenState.workspaces[wsID]
     else { return }
 
-    var idForGroup: [GroupKey: CGWindowID] = [:]
+    var idForGroup: [WindowNode.GroupKey: CGWindowID] = [:]
     for column in workspace.columns {
       for node in column.windows { idForGroup[node.groupKey] = node.id }
     }
