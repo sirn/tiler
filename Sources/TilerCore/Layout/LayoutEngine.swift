@@ -110,22 +110,23 @@ public enum LayoutEngine {
       case .stack:
         let totalGaps = gaps.innerGaps * CGFloat(column.windows.count - 1)
         let windowHeight = max(1, (colHeight - totalGaps) / CGFloat(column.windows.count))
+        let effectiveHeight = max(windowHeight, column.measuredMinHeight ?? 0)
         // Cocoa y is bottom-origin; lay out the stack top-down so windows[0] is the
         // topmost window (matches the up/down action semantics, where index 0 = top).
-        var windowY = usableRect.maxY - windowHeight
+        var windowY = usableRect.maxY - effectiveHeight
 
         for window in column.windows {
           let frame = NSRect(
             x: columnX,
             y: round(windowY),
             width: colWidth,
-            height: round(windowHeight)
+            height: round(effectiveHeight)
           )
           result[window.id] = frame
           tiler_debug(
             "[LayoutEngine]     window \(window.id) → frame(\(String(format: "%.1f", frame.minX)), \(String(format: "%.1f", frame.minY)), \(String(format: "%.1f", frame.width)), \(String(format: "%.1f", frame.height)))"
           )
-          windowY -= windowHeight + gaps.innerGaps
+          windowY -= effectiveHeight + gaps.innerGaps
         }
 
       case .tab:

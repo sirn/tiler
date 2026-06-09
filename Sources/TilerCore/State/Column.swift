@@ -13,6 +13,7 @@ public struct Column: Identifiable, Equatable {
   public var widthFraction: CGFloat
   // Measured minimum width set by the corrector when a window resists its assigned width
   public var measuredMinWidth: CGFloat?
+  public var measuredMinHeight: CGFloat?
 
   public init(
     id: UUID = UUID(),
@@ -20,7 +21,8 @@ public struct Column: Identifiable, Equatable {
     focusedWindowIndex: Int = 0,
     mode: ColumnMode = .stack,
     widthFraction: CGFloat = 0.5,
-    measuredMinWidth: CGFloat? = nil
+    measuredMinWidth: CGFloat? = nil,
+    measuredMinHeight: CGFloat? = nil
   ) {
     self.id = id
     self.windows = windows
@@ -28,5 +30,6 @@ public struct Column: Identifiable, Equatable {
     self.mode = mode
     self.widthFraction = widthFraction
     self.measuredMinWidth = measuredMinWidth
+    self.measuredMinHeight = measuredMinHeight
   }
 }
