@@ -725,8 +725,8 @@ public class WindowManager {
 
     // Add new windows
     for wid in adjustedToAdd {
-      guard let (pid, title, _) = windowInfo[wid] else { continue }
-      addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title)
+      guard let (pid, title, bounds) = windowInfo[wid] else { continue }
+      addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
       membershipChanged = true
     }
 
@@ -769,7 +769,7 @@ public class WindowManager {
     return screenState.workspaces[screenState.activeWorkspaceID]
   }
 
-  private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String) {
+  private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String, bounds: NSRect) {
     guard let screenID = activeScreenID(),
       let wsID = activeWorkspaceID(),
       var screenState = state.screens[screenID],
@@ -778,8 +778,44 @@ public class WindowManager {
 
     let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
 
+    // Native tab merge: windows of the same PID sharing the same frame
+    // (background tabs stacked behind the active tab) belong in one tab column.
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
+    let cocoaBounds = NSRect(
+      x: bounds.minX,
+      y: screenHeight - bounds.minY - bounds.height,
+      width: bounds.width,
+      height: bounds.height)
+    for idx in workspace.columns.indices {
+      let col = workspace.columns[idx]
+      guard let firstWin = col.windows.first(where: { $0.pid == pid }) else { continue }
+      let existingFrame: NSRect?
+      if let element = windowStore.element(for: firstWin.id) {
+        existingFrame = AXWindowBridge.currentFrame(for: element)
+      } else if let gk = groupKey(forID: firstWin.id), let applied = appliedWindows[gk]?.frame {
+        existingFrame = applied
+      } else {
+        existingFrame = nil
+      }
+      if let existingFrame = existingFrame,
+         AXWindowBridge.framesMatch(cocoaBounds, existingFrame, tolerance: 10) {
+        workspace.columns[idx].windows.append(node)
+        if workspace.columns[idx].mode == .stack { workspace.columns[idx].mode = .tab }
+        screenState.workspaces[wsID] = workspace
+        state.screens[screenID] = screenState
+        tiler_debug("Tab-merged window \(windowID) into column \(idx)")
+        return
+      }
+    }
+
+    // Preserve the window's current width as a fraction of usable viewport width.
+    let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
+    let widthFraction = usableWidth > 0
+        ? min(max(bounds.width / usableWidth, 0.1), 1.0)
+        : layoutConfig.defaultColumnWidth
+
     let column = Column(
-      windows: [node], focusedWindowIndex: 0, widthFraction: layoutConfig.defaultColumnWidth)
+      windows: [node], focusedWindowIndex: 0, widthFraction: widthFraction)
 
     if workspace.columns.isEmpty {
       workspace.columns = [column]

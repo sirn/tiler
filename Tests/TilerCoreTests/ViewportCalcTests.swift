@@ -3,9 +3,8 @@ import XCTest
 
 final class ViewportCalcTests: XCTestCase {
 
-  // N=3, 0.5 fracs, focus col 2, starting from offset 0:
-  // right-flush brings col 2's right edge to U; visibleRange is derived from
-  // the final offset (not a pre-clamp page start).
+  // N=3, 0.5 fracs (absolute): each col=500, content overflows (1516 > 1000).
+  // Focused col 2 forces scroll right. offset=516, visibleRange=1..<3 (any-part-visible).
   func testScrollRightNoSpill() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
     let screen = makeScreen()
@@ -14,14 +13,15 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    XCTAssertEqual(offset, 504, accuracy: 0.5)
+    XCTAssertEqual(offset, 516, accuracy: 0.5)
     XCTAssertEqual(range, 1..<3)
     // Last visible column's right edge must not exceed U
     let rightEdge = cols[range.upperBound - 1].right - offset
     XCTAssertEqual(rightEdge, 1000, accuracy: 0.01)
   }
 
-  // N=3, 0.5 fracs, focus col 1, already visible at offset 0 -> lazy, no scroll.
+  // N=3, 0.5 fracs (absolute): each col=500, content overflows.
+  // Focused col 1 forces scroll. offset=8, visibleRange=0..<2 (any-part-visible).
   func testLazyFocusAlreadyVisible() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
     let screen = makeScreen()
@@ -30,12 +30,12 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    XCTAssertEqual(offset, 0, accuracy: 0.5)
+    XCTAssertEqual(offset, 8, accuracy: 0.5)
     XCTAssertTrue(range.contains(1))
   }
 
-  // N=3, 0.5 fracs, focus col 0, current offset 492 (rightmost scroll):
-  // focus is left of vis={1,2} -> left-flush -> offset=0, col 0 visible.
+  // N=3, 0.5 fracs (absolute): content overflows, focus col 0.
+  // Clamped to offset=0, visibleRange=0..<2 (any-part-visible).
   func testScrollLeftFlush() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 0)
     let screen = makeScreen()
@@ -48,8 +48,9 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertTrue(range.contains(0))
   }
 
-  // N=4, all frac=0.7: no two columns fit together.
-  // Focus col 3 (last) from offset 0 -> right-flush: col 3's right edge flushes to U.
+  // N=4, all frac=0.7 (absolute): each col=700, content overflows (2824 > 1000).
+  // Focused col 3 forces scroll right. offset=1824, visibleRange=2..<4 (any-part-visible).
+
   func testDegenerateWideColumnRightFlush() {
     let ws = makeWorkspace(fractions: [0.7, 0.7, 0.7, 0.7], focus: 3)
     let screen = makeScreen()
@@ -58,17 +59,15 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    // With U=1000, widthBase=992, w=694: col3.right=2800, offset=1800
-    XCTAssertEqual(offset, 1800, accuracy: 1.0)
-    // Only focused column fits (0.7 frac = ~683 > half of U)
-    XCTAssertEqual(range, 3..<4)
-    // Right-flush: focused column's right edge must equal U within tolerance
+    XCTAssertEqual(offset, 1824, accuracy: 1.0)
+    XCTAssertEqual(range, 2..<4)
+    // Focused column's right edge flush with viewport
     XCTAssertEqual(cols[3].right - offset, 1000, accuracy: 1.0)
   }
 
-  // Variable-width columns: focused col cannot left-flush past maxScroll.
-  // col0=600, col1=300, col2=300 (columnGaps=0). W=1200, U=1000, maxScroll=200.
-  // Focus=2 from offset 0 -> rightward -> packFromLeft clamps at maxScroll=200.
+  // Variable-width columns (absolute): (0.6,0.3,0.3), gap=0.
+  // col0=600, col1=300, col2=300; content=1200 > U=1000, so scrolling needed.
+  // Focused col 2: offset=200, visibleRange=0..<3 (any-part-visible).
   func testVariableWidthScrollBoundary() {
     let ws = makeWorkspace(fractions: [0.6, 0.3, 0.3], focus: 2)
     let screen = makeScreen()
@@ -84,48 +83,52 @@ final class ViewportCalcTests: XCTestCase {
       "last visible column right edge must not exceed U")
   }
 
-  // MARK: - Strict containment edge cases
+  // MARK: - Any-part-visible (AABB overlap)
 
-  // Strict right-edge containment: a column overflowing the viewport by a
-  // sub-pixel margin (0.3pt — within the old 0.5 tolerance) must be EXCLUDED.
-  func testVisibleExcludesSubPixelRightOverflow() {
+  // Any-part-visible: a column overflowing the viewport right edge by a
+  // sub-pixel margin (0.3pt) still overlaps the viewport, so it IS visible.
+
+  func testVisibleWithAnyPart_RightOverflow() {
     let cols = [
       ColumnLayout(left: 0, width: 500),
       ColumnLayout(left: 500, width: 500.3),
     ]
-    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<1)
+    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<2)
   }
 
-  // Strict left-edge containment: a column starting before the viewport left
-  // by a sub-pixel margin must be EXCLUDED.
-  func testVisibleExcludesSubPixelLeftOverflow() {
+  // Any-part-visible: a column starting before the viewport left edge
+  // by a sub-pixel margin (-0.3) still overlaps the viewport, so it IS visible.
+
+  func testVisibleWithAnyPart_LeftOverflow() {
     let cols = [
       ColumnLayout(left: -0.3, width: 500),
       ColumnLayout(left: 500, width: 500),
     ]
-    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 1..<2)
+    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<2)
   }
 
   // Float noise within Double epsilon at magnitude 1000 (~1e-13) is admitted.
-  // Float noise on LEFT edge is admitted (via leftEpsilon).
-  // Right edge uses STRICT containment - NO epsilon for overflow.
+  // Any-part-visible detection: left=-1e-8, right=1000-1e-8; overlaps viewport. Admitted.
+
   func testVisibleAdmitsLeftFloatNoise() {
     // left = -1e-8 is within leftEpsilon (0.01), so admitted
     let cols = [ColumnLayout(left: -1e-8, width: 1000)]
     XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<1)
   }
 
-  func testVisibleRejectsRightFloatNoise() {
-    // Right edge = 1000 + 1e-8 > 1000 (U), so REJECTED (strict containment)
+  // Any-part-visible: right edge has float noise (1000+1e-8) but column
+  // still overlaps viewport, so it IS visible.
+
+  func testVisibleWithAnyPart_RightFloatNoise() {
     let cols = [ColumnLayout(left: 0, width: 1000 + 1e-8)]
-    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<0)
+    XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<1)
   }
 
   // MARK: - Layout / reflow consistency tests
 
-  // End-to-end: ViewportCalc + LayoutEngine must never place an on-screen window
-  // whose right edge exceeds the usable area (no spill regardless of which column
-  // is focused or what the starting offset is).
+  // N=3, 0.5 fracs (absolute): each col=500, content overflows viewport.
+  // ViewportCalc scrolls to keep focused column visible; visibleRange=1..<3 (any-part-visible).
+  // LayoutEngine must never place an on-screen window whose right edge exceeds the usable area.
   func testLayoutNoWindowSpill() {
     let win0 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w0")
     let win1 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w1")
@@ -154,14 +157,14 @@ final class ViewportCalcTests: XCTestCase {
     }
   }
 
-  // After increasing col 0's width, the saved scrollOffset (492) is passed as
-  // currentOffset. The old visible range no longer contains focus, so resolveOffset
-  // must recompute and keep col 2 visible without exceeding maxScroll.
+  // After widening col 0 to 0.7, content overflows more. The saved scroll offset
+  // (516) is stale for the new geometry; resolveOffset recomputes to 716,
+  // keeping col 2 visible (range=1..<3, any-part-visible) without exceeding maxScroll.
   func testPostWidthChangeReflow() {
     var ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
     let screen = makeScreen()
     let gaps = makeGaps()
-    // Establish initial scroll position (right-flush col 2)
+    // Establish initial scroll position (content overflows, offset=516)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (savedOffset, _) = ViewportCalc.resolveOffset(

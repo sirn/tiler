@@ -3,11 +3,10 @@ import XCTest
 
 final class LayoutGeometryTests: XCTestCase {
 
-  // Single column: measuredMinWidth larger than computed width should win
+  // Single column: fraction=0.3 → 300 requested (absolute), but minWidth=400 clamps
   func testMinWidthSingleColumnAbsorbed() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 0)
-    // widthFraction=0.3 → requested=300, but measuredMinWidth=400 should override
     let ws = makeWorkspaceWithMinWidths(fractions: [0.3], minWidths: [400], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     XCTAssertEqual(cols[0].width, 400, accuracy: 1.0)
@@ -17,8 +16,8 @@ final class LayoutGeometryTests: XCTestCase {
   func testMinWidthTwoColumnsNoOverlap() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 8)
-    // col0: fraction=0.3 → ~300 requested, but minWidth=500 overrides
-    // col1: fraction=0.3 → ~300
+    // col0: fraction=0.3 → 300 requested (absolute), but minWidth=500 overrides
+    // col1: fraction=0.3 → 300
     let ws = makeWorkspaceWithMinWidths(fractions: [0.3, 0.3], minWidths: [500, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     XCTAssertEqual(cols[1].left, cols[0].right + 8, accuracy: 1.0)
@@ -41,20 +40,20 @@ final class LayoutGeometryTests: XCTestCase {
     XCTAssertLessThanOrEqual(cols[1].right - offset, U + 0.01)
   }
 
-  // Baseline: with measuredMinWidth == nil, columns output matches hardcoded expectation
+  // Baseline: with measuredMinWidth == nil, columns are absolute proportions of U
+  // 3 columns of 0.5 each: width=500 (50% of U=1000), overflow the viewport
   func testMinWidthNilBaselineUnchanged() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 8)
-    // 3 columns of 0.5 each: widthBase = 1000 - 8 = 992; each col = round(992*0.5) = 496
     let ws = makeWorkspaceWithMinWidths(
       fractions: [0.5, 0.5, 0.5], minWidths: [nil, nil, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
-    XCTAssertEqual(cols[0].width, 496, accuracy: 1.0)
-    XCTAssertEqual(cols[1].width, 496, accuracy: 1.0)
-    XCTAssertEqual(cols[2].width, 496, accuracy: 1.0)
+    XCTAssertEqual(cols[0].width, 500, accuracy: 1.0)
+    XCTAssertEqual(cols[1].width, 500, accuracy: 1.0)
+    XCTAssertEqual(cols[2].width, 500, accuracy: 1.0)
     XCTAssertEqual(cols[0].left, 0, accuracy: 0.01)
-    XCTAssertEqual(cols[1].left, 504, accuracy: 1.0)  // 496 + 8
-    XCTAssertEqual(cols[2].left, 1008, accuracy: 1.0)  // 496 + 8 + 496 + 8
+    XCTAssertEqual(cols[1].left, 508, accuracy: 1.0)  // 500 + 8
+    XCTAssertEqual(cols[2].left, 1016, accuracy: 1.0)  // 500 + 8 + 500 + 8
   }
 
   // Adjacent-pair no-overlap: cols[i].right + columnGaps <= cols[i+1].left for all i
