@@ -1,0 +1,1364 @@
+import AppKit
+import ApplicationServices
+import CoreGraphics
+
+/// Snapshot for the menu bar workspace indicator.
+public struct WorkspaceIndicator: Equatable {
+  /// Workspace ids with at least one window (always including `current`), ascending.
+  public let occupied: [WorkspaceID]
+  /// The active workspace id.
+  public let current: WorkspaceID
+
+  public init(occupied: [WorkspaceID], current: WorkspaceID) {
+    self.occupied = occupied
+    self.current = current
+  }
+}
+
+/// Owns the tiling state and orchestrates the event→layout→apply pipeline.
+public class WindowManager {
+  public var state: TilerState
+  public var gaps: GapConfig
+  public var workspaceCount: Int
+  public var layoutConfig: LayoutConfig
+
+
+  public let windowStore = WindowStore()
+
+  /// Fired whenever the menu bar indicator state (occupied workspaces or current) changes.
+  public var onWorkspaceIndicatorChanged: ((WorkspaceIndicator) -> Void)?
+  private var lastIndicator: WorkspaceIndicator?
+
+  private let eventBroker: EventBroker
+
+  // Coalescing flags
+  private var needsReconcile = false
+  private var needsRetile = false
+  private var drainScheduled = false
+
+  // Convergence model:
+  // Each retile bumps applyEpoch and records a desired frame per window in appliedWindows.
+  // Incoming AX geometry events are treated as echoes when they match the recorded frame,
+  // otherwise as genuine user moves which trigger a debounced snap-back retile.
+  // A bounded corrector re-issues frames until they converge or are accepted, tracking the
+  // attempt count in the corrections field; apps with minimum-size or character-cell-quantized
+  // windows will settle at their nearest achievable geometry rather than the exact requested frame.
+  // Window reaping is debounced via missingCounts across reconcile cycles to tolerate transient
+  // AX read misses where kAXWindowsAttribute briefly returns fewer windows than actually exist.
+  private struct AppliedWindow {
+    var epoch: UInt64
+    var frame: NSRect
+    var corrections: Int = 0
+  }
+  private var applyEpoch: UInt64 = 0
+  private var nextGroupToken: UInt64 = 0
+  private func mintGroupKey() -> WindowNode.GroupKey {
+    nextGroupToken &+= 1
+    return WindowNode.GroupKey(value: nextGroupToken)
+  }
+  private var appliedWindows: [WindowNode.GroupKey: AppliedWindow] = [:]
+  private var moveSettleToken: UInt64 = 0
+  private var missingCounts: [CGWindowID: Int] = [:]
+  private var resolveCounts: [CGWindowID: Int] = [:]
+  private var resolveRetryToken: UInt64 = 0
+  private var consumeRefreshToken: UInt64 = 0
+  private var hadNoElementLastPass: Bool = false
+  private let statePersistence = StatePersistence()
+  private var needsSave = false
+  private var reconcileTimer: Timer?
+
+  public init(eventBroker: EventBroker, config: Config = Config.defaults) {
+    self.state = TilerState()
+    self.gaps = GapConfig(
+      outerGaps: config.general.outerGaps,
+      innerGaps: config.general.innerGaps,
+      columnGaps: config.general.columnGaps
+    )
+    self.workspaceCount = config.workspaces.count
+    self.layoutConfig = config.layout
+
+    self.eventBroker = eventBroker
+
+    eventBroker.onEvent = { [weak self] event in
+      self?.handleEvent(event)
+    }
+  }
+
+  deinit {
+    stop()
+  }
+
+  public func start() {
+    setNeedsReconcile()
+    scheduleDrain()
+    reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      self?.setNeedsReconcile()
+    }
+  }
+
+  public func stop() {
+    reconcileTimer?.invalidate()
+    reconcileTimer = nil
+  }
+
+  // MARK: - Coalescing drain
+
+  private func setNeedsReconcile() {
+    needsReconcile = true
+    scheduleDrain()
+  }
+
+  private func setNeedsRetile() {
+    needsRetile = true
+    scheduleDrain()
+  }
+
+  private func scheduleDrain() {
+    guard !drainScheduled else { return }
+    drainScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      self?.drain()
+    }
+  }
+
+  private func drain() {
+    drainScheduled = false
+    if needsRetile {
+      needsRetile = false
+      retileActiveWorkspace()
+      hideInactiveWorkspaces()
+    }
+    if needsReconcile {
+      needsReconcile = false
+      reconcile()
+    }
+    reconcilePendingFrames()
+    if needsSave {
+      needsSave = false
+      statePersistence.save(state)
+    }
+    emitWorkspaceIndicatorIfChanged()
+  }
+
+  /// Current indicator state for the active screen: workspaces with at least one window
+  /// (always including the active workspace), sorted ascending, plus the active workspace.
+  public func workspaceIndicator() -> WorkspaceIndicator? {
+    guard let screenID = activeScreenID(), let screenState = state.screens[screenID] else {
+      return nil
+    }
+    let current = screenState.activeWorkspaceID
+    var occupied = screenState.workspaces
+      .filter { _, ws in ws.columns.contains { !$0.windows.isEmpty } }
+      .map { $0.key }
+    if !occupied.contains(current) { occupied.append(current) }
+    occupied.sort()
+    return WorkspaceIndicator(occupied: occupied, current: current)
+  }
+
+  private func emitWorkspaceIndicatorIfChanged() {
+    guard let indicator = workspaceIndicator() else { return }
+    if indicator == lastIndicator { return }
+    lastIndicator = indicator
+    onWorkspaceIndicatorChanged?(indicator)
+  }
+
+  // MARK: - Screen & workspace setup
+
+  public func initializeScreens() {
+    let screens = NSScreen.screens
+    var screenStates: [ScreenID: ScreenState] = [:]
+
+    for screen in screens {
+      let screenID = screen.displayID ?? CGMainDisplayID()
+      let info = ScreenInfo(
+        id: screenID,
+        frame: screen.frame,
+        visibleFrame: screen.visibleFrame
+      )
+
+      var workspaces: [WorkspaceID: Workspace] = [:]
+      for i in 1...workspaceCount {
+        workspaces[i] = Workspace(id: i, columns: [], focusedColumnIndex: 0)
+      }
+
+      screenStates[screenID] = ScreenState(
+        info: info,
+        workspaces: workspaces,
+        activeWorkspaceID: 1
+      )
+    }
+
+    state.screens = screenStates
+
+    tiler_log("Initialized \(screenStates.count) screens, \(workspaceCount) workspaces each")
+  }
+
+  public func restoreState() {
+    guard let persisted = statePersistence.load() else { return }
+
+    var windowPool: [CGWindowID: WindowNode] = [:]
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for window in column.windows { windowPool[window.id] = window }
+        }
+      }
+    }
+    guard !windowPool.isEmpty else { return }
+
+    for screenID in state.screens.keys {
+      guard var screenState = state.screens[screenID] else { continue }
+      for wsID in screenState.workspaces.keys {
+        screenState.workspaces[wsID] = Workspace(id: wsID)
+      }
+      state.screens[screenID] = screenState
+    }
+
+    var placed: Set<CGWindowID> = []
+
+    for (screenIDStr, persistedScreen) in persisted.screens {
+      guard let screenID = UInt32(screenIDStr),
+            var screenState = state.screens[screenID] else { continue }
+
+      if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
+        screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
+      }
+
+      for (wsIDStr, persistedWS) in persistedScreen.workspaces {
+        guard let wsID = Int(wsIDStr),
+              wsID >= 1 && wsID <= workspaceCount,
+              var workspace = screenState.workspaces[wsID] else { continue }
+
+        restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
+      }
+
+      state.screens[screenID] = screenState
+    }
+
+    // Fallback: screen IDs changed (e.g. after lock/unlock); match by left-to-right order
+    if placed.isEmpty && !persisted.screens.isEmpty {
+      let orderedCurrent = state.screens.keys.sorted {
+        (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
+        (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+      }
+      let orderedPersisted = persisted.screens.keys.sorted { $0 < $1 }
+
+      for (pIdx, screenIDStr) in orderedPersisted.enumerated() {
+        guard let persistedScreen = persisted.screens[screenIDStr] else { continue }
+        let targetID = pIdx < orderedCurrent.count
+          ? orderedCurrent[pIdx]
+          : (orderedCurrent.last ?? orderedCurrent.first ?? 0)
+        guard var screenState = state.screens[targetID] else { continue }
+
+        if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
+          screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
+        }
+
+        for (wsIDStr, persistedWS) in persistedScreen.workspaces {
+          guard let wsID = Int(wsIDStr),
+                wsID >= 1 && wsID <= workspaceCount,
+                var workspace = screenState.workspaces[wsID] else { continue }
+
+          restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
+        }
+
+        state.screens[targetID] = screenState
+      }
+    }
+
+    let unplaced = windowPool.values.filter { !placed.contains($0.id) }
+    if !unplaced.isEmpty,
+       let screenID = activeScreenID(),
+       var screenState = state.screens[screenID],
+       var ws1 = screenState.workspaces[1] {
+      for window in unplaced {
+        ws1.columns.append(Column(
+          windows: [window],
+          focusedWindowIndex: 0,
+          widthFraction: layoutConfig.defaultColumnWidth
+        ))
+      }
+      if ws1.focusedColumnIndex >= ws1.columns.count {
+        ws1.focusedColumnIndex = max(0, ws1.columns.count - 1)
+      }
+      screenState.workspaces[1] = ws1
+      state.screens[screenID] = screenState
+    }
+
+    setNeedsRetile()
+    tiler_log("Restored state: \(placed.count) windows placed, \(windowPool.count - placed.count) unplaced")
+  }
+
+  /// Restore columns into a workspace from a persisted workspace, tracking placed windows.
+  private func restoreColumns(
+    from persistedWS: PersistedWorkspace,
+    into workspace: inout Workspace,
+    windowPool: [CGWindowID: WindowNode],
+    placed: inout Set<CGWindowID>
+  ) {
+    var restoredColumns: [Column] = []
+    for persistedCol in persistedWS.columns {
+      let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
+      guard !liveWindows.isEmpty else { continue }
+      let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
+      let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
+      restoredColumns.append(Column(
+        windows: liveWindows,
+        focusedWindowIndex: clampedIdx,
+        mode: mode,
+        widthFraction: persistedCol.widthFraction
+      ))
+      placed.formUnion(liveWindows.map { $0.id })
+    }
+    workspace.columns = restoredColumns
+    workspace.focusedColumnIndex = restoredColumns.isEmpty
+      ? 0
+      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+  }
+
+  // MARK: - Config
+
+  /// Apply a new config, updating gaps, workspace count, layout settings, and app rules.
+  /// If the workspace count changes, workspaces are re-initialized.
+  public func applyConfig(_ config: Config) {
+    self.gaps = GapConfig(
+      outerGaps: config.general.outerGaps,
+      innerGaps: config.general.innerGaps,
+      columnGaps: config.general.columnGaps
+    )
+    self.layoutConfig = config.layout
+
+
+    let oldCount = workspaceCount
+    self.workspaceCount = max(1, config.workspaces.count)
+
+    if oldCount != workspaceCount {
+      for (screenID, var screenState) in state.screens {
+        var workspaces = screenState.workspaces
+
+        if workspaceCount > oldCount {
+          for i in (oldCount + 1)...workspaceCount {
+            workspaces[i] = Workspace(id: i, columns: [], focusedColumnIndex: 0)
+          }
+        }
+
+        for wsID in workspaces.keys where wsID > workspaceCount {
+          if let ws = workspaces[wsID], !ws.columns.isEmpty {
+            guard var target = workspaces[1] else { continue }
+            for col in ws.columns {
+              for window in col.windows {
+                if target.columns.isEmpty {
+                  target.columns = [
+                    Column(
+                      windows: [window], focusedWindowIndex: 0,
+                      widthFraction: layoutConfig.defaultColumnWidth)
+                  ]
+                  target.focusedColumnIndex = 0
+                } else {
+                  target.columns[target.focusedColumnIndex].windows.append(window)
+                }
+              }
+            }
+            workspaces[1] = target
+          }
+          workspaces.removeValue(forKey: wsID)
+        }
+
+        screenState.workspaces = workspaces
+        if screenState.activeWorkspaceID > workspaceCount {
+          screenState.activeWorkspaceID = 1
+        }
+        state.screens[screenID] = screenState
+      }
+    }
+
+    setNeedsRetile()
+    tiler_log("Applied new config (gaps=\(config.general), workspaces=\(workspaceCount))")
+  }
+
+  // MARK: - Event handling
+
+  private func handleEvent(_ event: TilerEvent) {
+    switch event {
+    case .appLaunched:
+      setNeedsReconcile()
+    case .appTerminated(let pid):
+      windowStore.forget(pid: pid)
+      removeWindowsForPID(pid)
+      setNeedsRetile()
+    case .windowCreated(let element):
+      var pid: pid_t = 0
+      AXUIElementGetPid(element, &pid)
+      if let wid = windowStore.windowID(for: element),
+         WindowFilter.isTileable(element) {
+        windowStore.register(wid: wid, element: element, pid: pid)
+      }
+      setNeedsReconcile()
+    case .windowDestroyed(let element):
+      // Use the notification element directly to find the window ID.
+      // CGWindowList can lag behind AX destruction, so we can't trust the
+      // reconcile-based reaping for prompt removal.
+      let wid = windowStore.windowID(for: element)
+             ?? windowStore.windowIDByIdentity(for: element)
+      if let wid = wid {
+        removeWindow(windowID: wid)
+        setNeedsRetile()
+      } else {
+        setNeedsReconcile()
+      }
+    case .windowMinimized:
+      setNeedsReconcile()
+    case .windowDeminimized:
+      setNeedsReconcile()
+    case .focusChanged(let pid, let element):
+      handleFocusChanged(pid: pid, element: element)
+    case .geometryChanged(_, let element):
+      guard let wid = windowStore.windowID(for: element) else { return }
+      let decision: EchoDecision
+      if let observed = AXWindowBridge.currentFrame(for: element) {
+        decision = classifyGeometryChange(
+          observed: observed, applied: groupKey(forID: wid).flatMap { appliedWindows[$0]?.frame },
+          tolerance: 2.0)
+      } else {
+        decision = .genuineMove
+      }
+      switch decision {
+      case .echo:
+        return
+      case .genuineMove:
+        // Genuine user move/resize — debounce so snap-back fires after the user releases
+        moveSettleToken &+= 1
+        let token = moveSettleToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+          guard let self = self, self.moveSettleToken == token else { return }
+          self.setNeedsRetile()
+        }
+      }
+    }
+  }
+
+  public func reconcile() {
+    // Compute the set of pids currently managed in state so parked windows remain reachable
+    let managedPIDs = Set(
+      state.screens.values
+        .flatMap { $0.workspaces.values }
+        .flatMap { $0.columns }
+        .flatMap { $0.windows }
+        .map { $0.pid })
+    // Build tileable set from CGWindowList + WindowStore
+    guard
+      let windowList = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else {
+      tiler_log("reconcile: Could not get window list")
+      return
+    }
+
+    windowStore.refresh(windowList: windowList, managedPIDs: managedPIDs)
+
+    var tileableIDs: Set<CGWindowID> = []
+    var notTileableCandidates: Set<CGWindowID> = []
+    var noElementCandidates: Set<CGWindowID> = []
+    var windowInfo: [CGWindowID: (pid: pid_t, title: String, bounds: NSRect)] = [:]
+    var skippedNoElement = 0
+    var skippedNotTileable = 0
+    var totalCandidates = 0
+
+    for info in windowList {
+      guard let wid = info[kCGWindowNumber as String] as? CGWindowID else { continue }
+      guard let layer = info[kCGWindowLayer as String] as? Int, layer <= 0 else { continue }
+      guard let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
+      guard let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular
+      else { continue }
+
+      totalCandidates += 1
+      let title = info[kCGWindowName as String] as? String ?? ""
+      let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat]
+      let bounds = NSRect(
+        x: boundsDict?["X"] ?? 0, y: boundsDict?["Y"] ?? 0,
+        width: boundsDict?["Width"] ?? 0, height: boundsDict?["Height"] ?? 0)
+      windowInfo[wid] = (pid, title, bounds)
+
+      if let element = windowStore.element(for: wid) {
+        if WindowFilter.isTileable(element) {
+          tileableIDs.insert(wid)
+        } else {
+          skippedNotTileable += 1
+          notTileableCandidates.insert(wid)
+          tiler_debug("reconcile: skip not-tileable wid=\(wid) title='\(title)' pid=\(pid)")
+        }
+      } else {
+        skippedNoElement += 1
+        noElementCandidates.insert(wid)
+        tiler_debug("reconcile: skip no-element wid=\(wid) title='\(title)' pid=\(pid)")
+      }
+    }
+
+    // AX-orphan pass: discover windows that are in the AX tree but hidden from
+    // CGWindowListCopyWindowInfo (common in Chromium-based apps like Vivaldi).
+    // These windows have a valid axGetWindowID and tileable AX element but never
+    // appear in CGWindowList, so the main CG loop above misses them entirely.
+    let cgWindowIDs = Set(windowInfo.keys)
+    for pid in managedPIDs {
+      let storedWids = windowStore.wids(for: pid)
+      let orphanWids = storedWids.subtracting(cgWindowIDs)
+      for wid in orphanWids {
+        guard !tileableIDs.contains(wid), let element = windowStore.element(for: wid)
+        else { continue }
+        if WindowFilter.isTileable(element) {
+          tileableIDs.insert(wid)
+          totalCandidates += 1
+          tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
+        } else {
+          skippedNotTileable += 1
+          tiler_debug("reconcile: ax-orphan not-tileable wid=\(wid) pid=\(pid)")
+        }
+      }
+    }
+
+    tiler_debug(
+      "reconcile: \(totalCandidates) candidates, \(tileableIDs.count) tileable, \(skippedNoElement) no element, \(skippedNotTileable) not tileable"
+    )
+
+    // A managed window survives reconcile iff it is a tileable AX window AND it is either
+    // present in the on-screen CGWindowList or one we deliberately parked off-screen. A
+    // native background tab (in apps that keep every tab in the AX window list) is
+    // AX-tileable and resolvable but absent from the on-screen list; if its column sits in
+    // the visible area it renders as an invisible, unfocusable gap. We detect that by the
+    // window being absent from the on-screen list while its applied frame substantially
+    // overlaps the visible area, and drop it (debounced via missingCounts) so the tab group
+    // collapses back to its single visible tab. Windows we parked off-screen overlap the
+    // visible area by at most the ~1px edge sliver, so they are kept. Minimized / fullscreen
+    // (isTileable == false) and destroyed (element == nil) windows remain dropped.
+    let onScreenIDs = Set(windowInfo.keys)
+    var stillAlive: Set<CGWindowID> = []
+    for screenState in state.screens.values {
+      let visibleFrame = screenState.info.visibleFrame
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for window in column.windows {
+            guard let element = windowStore.element(for: window.id),
+              WindowFilter.isTileable(element)
+            else {
+              // Window has no element mapping. Check if it's a transient SPI
+              // failure (window still in AX tree but axGetWindowID failed) vs
+              // actual destruction (window gone from AX entirely).
+              if onScreenIDs.contains(window.id) {
+                // Read AX window list for this PID to check if window still exists
+                let appElement = AXUIElementCreateApplication(window.pid)
+                var windowsRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                   let axWindows = windowsRef as? [AXUIElement] {
+                  let isInAX = axWindows.contains { axGetWindowID($0) == window.id }
+                  if isInAX {
+                    stillAlive.insert(window.id)
+                  }
+                } else {
+                  // Can't read AX tree — transient issue, keep alive
+                  stillAlive.insert(window.id)
+                }
+              }
+              continue
+            }
+
+            if onScreenIDs.contains(window.id) {
+              stillAlive.insert(window.id)
+              continue
+            }
+            // Absent from the on-screen list. Keep it if it has no applied frame yet (just
+            // added, not laid out) or if that frame is essentially off-screen (we parked
+            // it); otherwise it is expected-visible but unrendered — a background tab.
+            guard let frame = appliedWindows[window.groupKey]?.frame else {
+              stillAlive.insert(window.id)
+              continue
+            }
+            let overlap =
+              min(frame.maxX, visibleFrame.maxX) - max(frame.minX, visibleFrame.minX)
+            if overlap <= 50 {
+              stillAlive.insert(window.id)
+            } else {
+              tiler_debug(
+                "reconcile: background-tab drop wid=\(window.id) pid=\(window.pid) overlap=\(Int(overlap)) (absent from on-screen list)")
+            }
+          }
+        }
+      }
+    }
+
+    // Compute the set of all managed window ids before any removal.
+    let managedIDs = Set(
+      state.screens.values
+        .flatMap { $0.workspaces.values }
+        .flatMap { $0.columns }
+        .flatMap { $0.windows }
+        .map { $0.id })
+
+    // Targeted position-resolve for windows whose AX element wasn't mapped by
+    // WindowStore (axGetWindowID SPI lag). Includes both new (unmanaged) windows whose
+    // AX element hasn't appeared yet, and managed windows that lost their mapping due
+    // to a transient axGetWindowID failure during refresh(). Position-matching is safe
+    // here because we match against unmapped AX windows only, with ambiguity detection.
+    for wid in noElementCandidates {
+      guard let info = windowInfo[wid] else { continue }
+      guard let element = windowStore.tryPositionResolve(pid: info.pid, cgBounds: info.bounds)
+      else { continue }
+      windowStore.register(wid: wid, element: element, pid: info.pid)
+      noElementCandidates.remove(wid)
+      if WindowFilter.isTileable(element) {
+        tileableIDs.insert(wid)
+        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
+      } else {
+        notTileableCandidates.insert(wid)
+        tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
+      }
+    }
+
+    let plan = reconcilePlan(
+      managedIDs: managedIDs,
+      stillAliveIDs: stillAlive,
+      tileableIDs: tileableIDs,
+      missingCounts: missingCounts,
+      missThreshold: 2,
+      unresolvedIDs: notTileableCandidates.subtracting(managedIDs),
+      noElementIDs: noElementCandidates.subtracting(managedIDs),
+      resolveCounts: resolveCounts,
+      resolveThreshold: 8)
+    missingCounts = plan.updatedMissingCounts
+    resolveCounts = plan.updatedResolveCounts
+    tiler_debug(
+      "reconcile: tileable=\(tileableIDs.sorted()) managed=\(managedIDs.sorted()) stillAlive=\(stillAlive.sorted()) toAdd=\(plan.toAdd.sorted()) toReap=\(plan.toReap.sorted())")
+
+    // Tab-correlation pass: when a native macOS tab switch happens, the previously-active tab
+    // window drops out of kAXWindowsAttribute (making it vanish from stillAlive) and a new
+    // CGWindowID appears at the same frame and pid. Without this pass, the old tile would be
+    // reaped and the new id inserted as a fresh column, jumbling the layout.
+    //
+    // We correlate each incoming new id against managed windows by (pid, frame) proximity,
+    // then either swap the id in-place (the old backing window is gone) or suppress the add
+    // entirely (the old backing window is still live — event-ordering lag or sibling tab).
+    var adjustedToAdd = plan.toAdd
+    var tabSwaps: [CGWindowID: CGWindowID] = [:]  // old -> new
+
+    if let activeScr = activeScreenID(), let activeWS = activeWorkspaceID(),
+      let activeManagedState = state.screens[activeScr]?.workspaces[activeWS]
+    {
+      // Collect managed windows in the active workspace with their applied frames.
+      let managedInActiveWS: [(id: CGWindowID, pid: pid_t, applied: NSRect)] =
+        activeManagedState.columns
+        .flatMap { $0.windows }
+        .compactMap { win -> (id: CGWindowID, pid: pid_t, applied: NSRect)? in
+          guard let frame = appliedWindows[win.groupKey]?.frame else { return nil }
+          return (win.id, win.pid, frame)
+        }
+
+      let vanished = Set(managedInActiveWS.map { $0.id }).subtracting(stillAlive)
+      var consumed: Set<CGWindowID> = []
+
+      // The new window's CGWindowList bounds are top-left origin; managed tiles' applied
+      // frames are Cocoa bottom-left. Convert before matching so all four edges (including
+      // Y) are comparable — Y is essential to tell vertically-stacked same-pid windows apart.
+      let screenHeight = AXWindowBridge.primaryScreenHeight()
+
+      for newID in adjustedToAdd.sorted() {
+        guard let info = windowInfo[newID] else { continue }
+        let cocoaBounds = NSRect(
+          x: info.bounds.minX,
+          y: screenHeight - info.bounds.minY - info.bounds.height,
+          width: info.bounds.width,
+          height: info.bounds.height)
+
+        let candidates = managedInActiveWS.filter { v in
+          v.pid == info.pid && !consumed.contains(v.id)
+            && framesMatch(cocoaBounds, v.applied, tolerance: 10)
+        }
+        // Only correlate on an unambiguous match. Zero or multiple same-pid tiles at this
+        // frame (e.g. several columns parked at the same off-screen edge) are ambiguous, so
+        // leave the new window to be added as its own column rather than risk swapping the
+        // wrong tile. A spurious column self-heals on a later reconcile; a wrong swap is
+        // silent, permanent corruption.
+        guard candidates.count == 1, let match = candidates.first else { continue }
+
+        if vanished.contains(match.id) {
+          // Case A: the managed window for this frame left — adopt the new active id in-place.
+          tabSwaps[match.id] = newID
+          consumed.insert(match.id)
+          adjustedToAdd.remove(newID)
+          tiler_debug("Native tab swap: wid \(match.id) -> \(newID)")
+        } else {
+          // Case B: the managed window still backs this tile; suppress the redundant sibling.
+          adjustedToAdd.remove(newID)
+          tiler_debug("Native tab sibling suppressed: wid \(newID) (live tile \(match.id))")
+        }
+      }
+    }
+
+    // Apply tab swaps: replace old ids in-place so the tile keeps its column position.
+    for (oldID, newID) in tabSwaps {
+      guard let info = windowInfo[newID] else { continue }
+      swapWindowID(from: oldID, to: newID, title: info.title)
+      missingCounts.removeValue(forKey: oldID)
+      resolveCounts.removeValue(forKey: oldID)
+    }
+    if !tabSwaps.isEmpty {
+      setNeedsRetile()
+    }
+
+    // Remove windows that have been consistently missing (destroyed, minimized, fullscreen).
+    // Off-screen-parked windows remain in stillAlive and are preserved.
+    var membershipChanged = false
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        var changed = false
+        for colIdx in workspace.columns.indices.reversed() {
+          let before = workspace.columns[colIdx].windows.count
+          let reaped = workspace.columns[colIdx].windows.filter { plan.toReap.contains($0.id) }
+          for w in reaped {
+            tiler_debug("reconcile: reaping wid=\(w.id) pid=\(w.pid) title='\(w.title)' from ws=\(wsID)")
+          }
+          workspace.columns[colIdx].windows.removeAll { plan.toReap.contains($0.id) }
+          if workspace.columns[colIdx].windows.count < before {
+            changed = true
+            membershipChanged = true
+          }
+          if workspace.columns[colIdx].windows.isEmpty {
+            workspace.columns.remove(at: colIdx)
+            changed = true
+            membershipChanged = true
+          }
+        }
+        if workspace.focusedColumnIndex >= workspace.columns.count && !workspace.columns.isEmpty {
+          workspace.focusedColumnIndex = workspace.columns.count - 1
+        }
+        if changed {
+          screenState.workspaces[wsID] = workspace
+        }
+      }
+      state.screens[screenID] = screenState
+    }
+
+    // When no-element windows disappear (transient backing windows replaced),
+    // schedule one final retry in case the real window appears with a different
+    // CGWindowID shortly after.
+    if hadNoElementLastPass && noElementCandidates.isEmpty {
+      resolveRetryToken &+= 1
+      let token = resolveRetryToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        guard let self = self, self.resolveRetryToken == token else { return }
+        self.setNeedsReconcile()
+      }
+    }
+    hadNoElementLastPass = !noElementCandidates.isEmpty
+
+    if plan.hasPendingMiss {
+      setNeedsReconcile()
+    }
+
+    if plan.hasPendingResolve || plan.hasPendingNoElementResolve {
+      resolveRetryToken &+= 1
+      let token = resolveRetryToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        guard let self = self, self.resolveRetryToken == token else { return }
+        self.setNeedsReconcile()
+      }
+    }
+
+    // Add new windows
+    for wid in adjustedToAdd {
+      guard let (pid, title, bounds) = windowInfo[wid] else { continue }
+      addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
+      membershipChanged = true
+    }
+
+    if membershipChanged {
+      setNeedsRetile()
+    }
+    if membershipChanged { needsSave = true }
+
+    // Prune appliedWindows for windows no longer in state
+    let liveGroupKeys = Set(
+      state.screens.values.flatMap { $0.workspaces.values }.flatMap { $0.columns }.flatMap {
+        $0.windows
+      }.map { $0.groupKey })
+    appliedWindows = appliedWindows.filter { liveGroupKeys.contains($0.key) }
+  }
+
+  private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
+    guard let wid = windowStore.windowID(for: element) else { return }
+    updateFocus(windowID: wid)
+  }
+
+  // MARK: - State mutations
+
+  private func activeScreenID() -> ScreenID? {
+    if let keyWindowScreen = NSScreen.main ?? NSScreen.screens.first {
+      return keyWindowScreen.displayID ?? CGMainDisplayID()
+    }
+    return state.screens.keys.first ?? CGMainDisplayID()
+  }
+
+  public func activeWorkspaceID() -> WorkspaceID? {
+    guard let screenID = activeScreenID() else { return nil }
+    return state.screens[screenID]?.activeWorkspaceID
+  }
+
+  public var activeWorkspace: Workspace? {
+    guard let screenID = activeScreenID(),
+      let screenState = state.screens[screenID]
+    else { return nil }
+    return screenState.workspaces[screenState.activeWorkspaceID]
+  }
+
+  private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String, bounds: NSRect) {
+    guard let screenID = activeScreenID(),
+      let wsID = activeWorkspaceID(),
+      var screenState = state.screens[screenID],
+      var workspace = screenState.workspaces[wsID]
+    else { return }
+
+    let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
+
+    // Preserve the window's current width as a fraction of usable viewport width.
+    // The only resizing scenario is consume/expel into an existing column.
+    let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
+    let widthFraction = usableWidth > 0
+        ? min(max(bounds.width / usableWidth, 0.1), 1.0)
+        : layoutConfig.defaultColumnWidth
+
+    let column = Column(
+      windows: [node], focusedWindowIndex: 0, widthFraction: widthFraction)
+
+    if workspace.columns.isEmpty {
+      workspace.columns = [column]
+      workspace.focusedColumnIndex = 0
+    } else {
+      let insertAt = min(workspace.focusedColumnIndex + 1, workspace.columns.count)
+      workspace.columns.insert(column, at: insertAt)
+      workspace.focusedColumnIndex = insertAt
+    }
+
+    screenState.workspaces[wsID] = workspace
+    state.screens[screenID] = screenState
+    tiler_debug(
+      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
+    )
+  }
+
+  /// Replace a managed window's id in-place (for native-tab active-window changes).
+  /// The new node keeps the old node's position within its column.
+  private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
+    state.swapWindowID(from: oldID, to: newID, title: title)
+  }
+
+  private func removeWindow(windowID: CGWindowID) {
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        for (colIdx, var column) in workspace.columns.enumerated() {
+          guard let removeIdx = column.windows.firstIndex(where: { $0.id == windowID })
+          else { continue }
+          let removedKey = column.windows[removeIdx].groupKey
+          column.windows.remove(at: removeIdx)
+
+          if column.windows.isEmpty {
+            workspace.columns.remove(at: colIdx)
+            if workspace.focusedColumnIndex >= workspace.columns.count && !workspace.columns.isEmpty {
+              workspace.focusedColumnIndex = workspace.columns.count - 1
+            }
+          } else {
+            if column.focusedWindowIndex >= column.windows.count {
+              column.focusedWindowIndex = column.windows.count - 1
+            }
+            workspace.columns[colIdx] = column
+          }
+
+          screenState.workspaces[wsID] = workspace
+          state.screens[screenID] = screenState
+          appliedWindows.removeValue(forKey: removedKey)
+          tiler_log("Removed window \(windowID) from workspace \(wsID)")
+          return
+        }
+      }
+    }
+  }
+
+  private func removeWindowsForPID(_ pid: pid_t) {
+    for (screenID, var screenState) in state.screens {
+      var screenChanged = false
+      for (wsID, var workspace) in screenState.workspaces {
+        var changed = false
+        for colIdx in workspace.columns.indices.reversed() {
+          let before = workspace.columns[colIdx].windows.count
+          let removedKeys = workspace.columns[colIdx].windows.filter { $0.pid == pid }.map {
+            $0.groupKey
+          }
+          workspace.columns[colIdx].windows.removeAll { $0.pid == pid }
+          if workspace.columns[colIdx].windows.count < before {
+            changed = true
+            for gk in removedKeys { appliedWindows.removeValue(forKey: gk) }
+          }
+          if workspace.columns[colIdx].windows.isEmpty {
+            workspace.columns.remove(at: colIdx)
+            changed = true
+          }
+        }
+        if workspace.focusedColumnIndex >= workspace.columns.count && !workspace.columns.isEmpty {
+          workspace.focusedColumnIndex = workspace.columns.count - 1
+        }
+        if changed {
+          screenState.workspaces[wsID] = workspace
+          screenChanged = true
+        }
+      }
+      if screenChanged {
+        state.screens[screenID] = screenState
+      }
+    }
+  }
+
+  private func updateFocus(windowID: CGWindowID) {
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        for (colIdx, var column) in workspace.columns.enumerated() {
+          if let winIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
+            column.focusedWindowIndex = winIdx
+            workspace.columns[colIdx] = column
+            workspace.focusedColumnIndex = colIdx
+            screenState.workspaces[wsID] = workspace
+            state.screens[screenID] = screenState
+            return
+          }
+        }
+      }
+    }
+  }
+
+  /// The stable groupKey of the tile currently backed by `wid`, or nil if `wid` isn't a tile.
+  private func groupKey(forID wid: CGWindowID) -> WindowNode.GroupKey? {
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          if let node = column.windows.first(where: { $0.id == wid }) { return node.groupKey }
+        }
+      }
+    }
+    return nil
+  }
+
+  /// True when the given window id is tracked by any tile in any workspace.
+  private func isManaged(_ wid: CGWindowID) -> Bool {
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          if column.windows.contains(where: { $0.id == wid }) { return true }
+        }
+      }
+    }
+    return false
+  }
+
+  // MARK: - Action handling
+
+  public func handleAction(_ action: Action) {
+    let effects = Reducer.apply(action, to: &state, env: computeEnv())
+    runEffects(effects)
+    needsSave = true
+  }
+
+
+  private func computeEnv() -> ReducerEnv {
+    ReducerEnv(
+      workspaceCount: workspaceCount,
+      defaultColumnWidth: layoutConfig.defaultColumnWidth,
+      activeScreenID: activeScreenID()
+    )
+  }
+  private func runEffects(_ effects: [Effect]) {
+    for effect in effects {
+      switch effect {
+      case .retile:
+        setNeedsRetile()
+      case .focusFocusedWindow(let screenID, let wsID):
+        guard let screenState = state.screens[screenID],
+              let workspace = screenState.workspaces[wsID]
+        else { break }
+        focusFocusedWindow(in: workspace)
+      case .closeWindow(let windowID):
+        guard let element = windowStore.element(for: windowID) else { break }
+        var closeButton: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &closeButton)
+        if let btn = closeButton {
+          AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
+        }
+      case .toggleFullscreen(let windowID):
+        guard let element = windowStore.element(for: windowID) else { break }
+        var fullscreen: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullscreen)
+        if result == .success, let isFullscreen = fullscreen as? Bool {
+          AXUIElementSetAttributeValue(
+            element, "AXFullScreen" as CFString, !isFullscreen as CFTypeRef)
+          tiler_log("Toggled fullscreen on window \(windowID)")
+        }
+      case .refreshTabs(let screenID, let wsID):
+        refreshActiveTabs(screenID: screenID, wsID: wsID)
+      case .scheduleDeferredTabRefresh(let screenID, let wsID):
+        scheduleDeferredTabRefresh(screenID: screenID, wsID: wsID)
+
+      case .log(let message):
+        tiler_log(message)
+      }
+    }
+  }
+
+  /// Refresh every tile in the workspace to its native-tab group's live active tab.
+  /// A no-op for healthy tiles; an in-place id swap (groupKey preserved) for stale
+  /// background-tab tiles. Returns true if any tile was adopted.
+  @discardableResult
+  private func refreshActiveTabs(screenID: ScreenID, wsID: WorkspaceID) -> Bool {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID] else { return false }
+    // Snapshot the tiles first; swapWindowID mutates state during the loop.
+    let tiles = workspace.columns.flatMap { $0.windows }
+    var changed = false
+    for node in tiles {
+      guard let frame = appliedWindows[node.groupKey]?.frame,
+        let active = currentActiveTab(pid: node.pid, tileFrame: frame, currentID: node.id)
+      else { continue }
+      swapWindowID(from: node.id, to: active.wid, title: node.title)
+      changed = true
+      tiler_debug("tab refresh: tile \(node.id) -> \(active.wid) (live active tab)")
+    }
+    return changed
+  }
+
+  /// Re-run the active-tab refresh a few times after a structural change or a focus that
+  /// landed on a stale tile. Ghostty intermittently drops a tab from its AX window list, so
+  /// an immediate refresh can miss the live tab; this settle-and-retry catches it once the
+  /// flicker clears. Token-coalesced: a newer schedule supersedes the previous chain, and a
+  /// step only retiles when it actually adopted a tile.
+  private func scheduleDeferredTabRefresh(screenID: ScreenID, wsID: WorkspaceID) {
+    consumeRefreshToken &+= 1
+    let token = consumeRefreshToken
+    for delay in [0.15, 0.35, 0.6] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self = self, self.consumeRefreshToken == token else { return }
+        if self.refreshActiveTabs(screenID: screenID, wsID: wsID) {
+          self.setNeedsRetile()
+        }
+      }
+    }
+  }
+
+  // MARK: - Focus helpers
+
+  private func focusFocusedWindow(in workspace: Workspace) {
+    guard !workspace.columns.isEmpty,
+      workspace.focusedColumnIndex < workspace.columns.count
+    else { return }
+    let col = workspace.columns[workspace.focusedColumnIndex]
+    guard col.focusedWindowIndex < col.windows.count else { return }
+    let window = col.windows[col.focusedWindowIndex]
+    tiler_debug(
+      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.groupKey]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
+
+    var targetElement = windowStore.element(for: window.id)
+    var raisedWid = window.id
+    var adopted = false
+
+    // A native tab group has exactly one window in the on-screen CGWindowList (background
+    // tabs are absent), so the on-screen window matching this tile's frame is the group's
+    // currently-active tab. Switching tabs emits no usable notification, so our stored id
+    // can be a stale sibling; raising it would force the app back to that tab. Resolve the
+    // active tab and adopt its id in place, then raise it (a no-op for tab selection).
+    if let tileFrame = appliedWindows[window.groupKey]?.frame,
+      let active = currentActiveTab(pid: window.pid, tileFrame: tileFrame, currentID: window.id),
+      active.wid != window.id
+    {
+      swapWindowID(from: window.id, to: active.wid, title: window.title)
+      missingCounts.removeValue(forKey: window.id)
+      resolveCounts.removeValue(forKey: window.id)
+      targetElement = active.element
+      raisedWid = active.wid
+      adopted = true
+      tiler_debug("focus: tab adopt \(window.id) -> \(active.wid)")
+    }
+
+    guard let element = targetElement else {
+      tiler_debug("focus: no element for tile=\(window.id) pid=\(window.pid) — fallback raise + reconcile")
+      // The stored id is a dead/invisible tab and the active tab couldn't be adopted cleanly
+      // (transient mid tab-switch, or it's tracked elsewhere). Fall back to raising whatever
+      // on-screen window sits at this tile's frame so focus still lands on the group, then
+      // activate the app and reconcile to repair the tile id.
+      if let app = NSRunningApplication(processIdentifier: window.pid) {
+        app.activate(options: [.activateIgnoringOtherApps])
+        app.activate(options: [.activateIgnoringOtherApps])
+      }
+      if let tileFrame = appliedWindows[window.groupKey]?.frame,
+        let fallback = windowAtFrame(pid: window.pid, frame: tileFrame)
+      {
+        AXUIElementSetAttributeValue(fallback, kAXMainAttribute as CFString, true as CFTypeRef)
+        AXUIElementPerformAction(fallback, kAXRaiseAction as CFString)
+      }
+      setNeedsReconcile()
+      if let sid = activeScreenID(), let wid = activeWorkspaceID() {
+        scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
+      }
+      return
+    }
+
+    // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
+    // First set kAXMainAttribute so the window becomes key, then raise it to bring it
+    // to front. Some apps (Ghostty) need app.activate() called twice synchronously
+    // to yield keyboard focus — the first call syncs internal state, the second
+    // completes the transfer (AeroSpace pattern).
+    AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, true as CFTypeRef)
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    if let app = NSRunningApplication(processIdentifier: window.pid) {
+      app.activate(options: [.activateIgnoringOtherApps])
+      app.activate(options: [.activateIgnoringOtherApps])
+
+    }
+    tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
+
+    // If we raised the stored tile without adopting an active tab, and that tile is absent
+    // from the on-screen CGWindowList while we expect it visible (its applied frame
+    // substantially overlaps the visible area), it is a native background tab rendering as
+    // an invisible, unfocusable column. Kick a reconcile so the reaper collapses it now
+    // rather than on the next window open/close.
+    if !adopted,
+      let frame = appliedWindows[window.groupKey]?.frame,
+      let screenID = activeScreenID(),
+      let visibleFrame = state.screens[screenID]?.info.visibleFrame
+    {
+      let overlap = min(frame.maxX, visibleFrame.maxX) - max(frame.minX, visibleFrame.minX)
+      if overlap > 50, !isOnScreen(window.id) {
+        tiler_debug("focus: tile=\(window.id) is a visible background tab — kicking reconcile")
+        setNeedsReconcile()
+        if let sid = activeScreenID(), let wid = activeWorkspaceID() {
+          scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
+        }
+      }
+    }
+  }
+
+  /// The currently-active tab window for a native tab group: the single on-screen
+  /// CGWindowList window matching `tileFrame` for `pid` (background tabs are absent from
+  /// the on-screen list). CGWindowList bounds are top-left origin; `tileFrame` is Cocoa
+  /// bottom-left, so convert before matching — the Y axis disambiguates vertically-stacked
+  /// same-pid windows. Adoption is intentionally conservative: it only returns a window
+  /// when EXACTLY ONE on-screen window matches the frame and that window is not already a
+  /// managed tile. Multiple matches (e.g. several same-app columns parked at the same
+  /// off-screen edge) are ambiguous, so we leave the tile unchanged rather than risk
+  /// adopting another tile's window.
+  private func currentActiveTab(pid: pid_t, tileFrame: NSRect, currentID: CGWindowID)
+    -> (wid: CGWindowID, element: AXUIElement)?
+  {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
+    var matches: [CGWindowID] = []
+    for info in list {
+      guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+        let wid = info[kCGWindowNumber as String] as? CGWindowID,
+        let layer = info[kCGWindowLayer as String] as? Int, layer <= 0,
+        let b = info[kCGWindowBounds as String] as? [String: CGFloat]
+      else { continue }
+      let cocoaY = screenHeight - (b["Y"] ?? 0) - (b["Height"] ?? 0)
+      let cocoa = NSRect(
+        x: b["X"] ?? 0, y: cocoaY, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+      if framesMatch(cocoa, tileFrame, tolerance: 10) {
+        matches.append(wid)
+      }
+    }
+    // Only adopt on an unambiguous match to a window not owned by another tile.
+    guard matches.count == 1, let activeWid = matches.first,
+      activeWid != currentID, !isManaged(activeWid)
+    else { return nil }
+    guard
+      let element = windowStore.element(for: activeWid)
+        ?? windowStore.liveElement(forPID: pid, wid: activeWid)
+    else { return nil }
+    return (activeWid, element)
+  }
+
+  /// Best-effort: any on-screen window of `pid` physically located at `frame` (Cocoa
+  /// coords), resolved to an AX element. Unlike `currentActiveTab` this applies no
+  /// unique/unmanaged guard — it is only used to put focus on a group whose tile id has
+  /// gone stale and whose active tab couldn't be adopted cleanly, so raising the wrong
+  /// sibling is harmless (it's focus, not an id swap).
+  private func windowAtFrame(pid: pid_t, frame: NSRect) -> AXUIElement? {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
+    for info in list {
+      guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+        let wid = info[kCGWindowNumber as String] as? CGWindowID,
+        let layer = info[kCGWindowLayer as String] as? Int, layer <= 0,
+        let b = info[kCGWindowBounds as String] as? [String: CGFloat]
+      else { continue }
+      let cocoaY = screenHeight - (b["Y"] ?? 0) - (b["Height"] ?? 0)
+      let cocoa = NSRect(
+        x: b["X"] ?? 0, y: cocoaY, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+      if framesMatch(cocoa, frame, tolerance: 10) {
+        return windowStore.element(for: wid) ?? windowStore.liveElement(forPID: pid, wid: wid)
+      }
+    }
+    return nil
+  }
+
+  /// True if `wid` currently appears in the on-screen CGWindowList. A native background tab
+  /// does not, even when it remains a resolvable AX window.
+  private func isOnScreen(_ wid: CGWindowID) -> Bool {
+    guard
+      let list = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return true }
+    for info in list {
+      if let w = info[kCGWindowNumber as String] as? CGWindowID, w == wid { return true }
+    }
+    return false
+  }
+
+
+
+  private func hideInactiveWorkspaces() {
+    guard activeScreenID() != nil, activeWorkspaceID() != nil
+    else { return }
+
+    var frames: [CGWindowID: NSRect] = [:]
+
+    for (_, screenState) in state.screens {
+      let visibleFrame = screenState.info.visibleFrame
+      for (wsID, workspace) in screenState.workspaces {
+        // Only park windows that are NOT on the active workspace of each screen
+        guard wsID != screenState.activeWorkspaceID else { continue }
+        for column in workspace.columns {
+          for window in column.windows {
+            let wid = window.id
+            // Idempotency: already parked if record's minX is left of the visible area
+            if let record = appliedWindows[window.groupKey], record.frame.minX < visibleFrame.minX {
+              continue
+            }
+            guard let element = windowStore.element(for: wid) else { continue }
+            guard let current = AXWindowBridge.currentFrame(for: element) else { continue }
+            // Park position-only: right edge lands 1px into visible area, size unchanged
+            let parked = NSRect(
+              x: visibleFrame.minX - current.width + 1,
+              y: current.minY,
+              width: current.width,
+              height: current.height)
+            frames[wid] = parked
+          }
+        }
+      }
+    }
+
+    guard !frames.isEmpty else { return }
+    // Record before applying so incoming AX events are treated as echoes
+    for (wid, parked) in frames {
+      if let gk = groupKey(forID: wid) {
+        appliedWindows[gk] = AppliedWindow(epoch: applyEpoch, frame: parked)
+      }
+    }
+    AXWindowBridge.applyFrames(frames, store: windowStore)
+    tiler_debug("Parked \(frames.count) windows from inactive workspaces")
+  }
+
+  // MARK: - Layout
+
+  private func retileActiveWorkspace() {
+    guard let wsID = activeWorkspaceID(),
+      let screenID = activeScreenID(),
+      var screenState = state.screens[screenID],
+      var workspace = screenState.workspaces[wsID]
+    else {
+      return
+    }
+    let context = LayoutContext(screen: screenState.info, gaps: gaps)
+    let output = LayoutResolver.resolve(workspace, context)
+    workspace.scrollOffset = output.offset
+    screenState.workspaces[wsID] = workspace
+    state.screens[screenID] = screenState
+    applyEpoch &+= 1
+    for column in workspace.columns {
+      for node in column.windows {
+        if let frame = output.frames[node.id] {
+          appliedWindows[node.groupKey] = AppliedWindow(epoch: applyEpoch, frame: frame)
+        }
+      }
+    }
+    AXWindowBridge.applyFrames(output.frames, store: windowStore)
+    if !output.frames.isEmpty {
+      tiler_debug("Laid out \(output.frames.count) windows on workspace \(wsID)")
+    }
+  }
+
+  // MARK: - Corrector
+
+  /// Re-issue frames for windows that haven't reached their desired geometry yet.
+  /// Runs once per drain cycle; convergence is driven by incoming AX resize notifications.
+  private func reconcilePendingFrames() {
+    guard let wsID = activeWorkspaceID(),
+      let screenID = activeScreenID(),
+      let screenState = state.screens[screenID],
+      let workspace = screenState.workspaces[wsID]
+    else { return }
+
+    var idForGroup: [WindowNode.GroupKey: CGWindowID] = [:]
+    for column in workspace.columns {
+      for node in column.windows { idForGroup[node.groupKey] = node.id }
+    }
+
+    for (gk, record) in appliedWindows where record.epoch == applyEpoch && idForGroup[gk] != nil {
+      let wid = idForGroup[gk]!
+      guard let element = windowStore.element(for: wid) else { continue }
+      guard let observed = AXWindowBridge.currentFrame(for: element) else { continue }
+
+      if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
+        appliedWindows[gk]?.corrections = 0
+      } else if (appliedWindows[gk]?.corrections ?? 0) < 3 {
+        tiler_debug(
+          "correct: wid=\(wid) re-issue attempt=\((appliedWindows[gk]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)")
+        AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
+        appliedWindows[gk]?.corrections += 1
+      } else {
+        // Budget exhausted: the window won't reach the exact frame (min-size or
+        // character-cell quantization). If it's wider than desired, absorb that into
+        // the column width; otherwise accept its actual settled frame as the echo
+        // reference so future geometry events at this position are treated as echoes
+        // (prevents the snap-back path from looping on quantized windows).
+        tiler_debug(
+          "correct: wid=\(wid) gave up after 3 tries — observed=\(observed) intended=\(record.frame)")
+        if observed.width > record.frame.width + 2.0 {
+          absorbMinWidth(wid: wid, observedWidth: observed.width)
+        } else {
+          appliedWindows[gk]?.frame = observed
+        }
+      }
+    }
+  }
+
+  // MARK: - Min-width absorption
+
+  /// Record that a window resisted being narrower than observedWidth, and retile to accommodate.
+  private func absorbMinWidth(wid: CGWindowID, observedWidth: CGFloat) {
+    guard let screenID = activeScreenID(),
+      let wsID = activeWorkspaceID(),
+      var screenState = state.screens[screenID],
+      var workspace = screenState.workspaces[wsID]
+    else { return }
+
+    for colIdx in workspace.columns.indices {
+      if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+        workspace.columns[colIdx].measuredMinWidth = max(
+          workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
+        screenState.workspaces[wsID] = workspace
+        state.screens[screenID] = screenState
+        setNeedsRetile()
+        tiler_debug("Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx)")
+        return
+      }
+    }
+  }
+}
