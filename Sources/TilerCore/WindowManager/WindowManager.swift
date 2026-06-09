@@ -63,6 +63,7 @@ public class WindowManager {
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
+  private var reconcileTimer: Timer?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -88,9 +89,14 @@ public class WindowManager {
   public func start() {
     setNeedsReconcile()
     scheduleDrain()
+    reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      self?.setNeedsReconcile()
+    }
   }
 
   public func stop() {
+    reconcileTimer?.invalidate()
+    reconcileTimer = nil
   }
 
   // MARK: - Coalescing drain
