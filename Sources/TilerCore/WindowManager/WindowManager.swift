@@ -63,6 +63,8 @@ public class WindowManager {
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
+  private let statePersistence = StatePersistence()
+  private var needsSave = false
   private var reconcileTimer: Timer?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
@@ -131,6 +133,10 @@ public class WindowManager {
       reconcile()
     }
     reconcilePendingFrames()
+    if needsSave {
+      needsSave = false
+      statePersistence.save(state)
+    }
     emitWorkspaceIndicatorIfChanged()
   }
 
@@ -185,6 +191,90 @@ public class WindowManager {
     state.screens = screenStates
 
     tiler_log("Initialized \(screenStates.count) screens, \(workspaceCount) workspaces each")
+  }
+
+  public func restoreState() {
+    guard let persisted = statePersistence.load() else { return }
+
+    var windowPool: [CGWindowID: WindowNode] = [:]
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for window in column.windows { windowPool[window.id] = window }
+        }
+      }
+    }
+    guard !windowPool.isEmpty else { return }
+
+    for screenID in state.screens.keys {
+      guard var screenState = state.screens[screenID] else { continue }
+      for wsID in screenState.workspaces.keys {
+        screenState.workspaces[wsID] = Workspace(id: wsID)
+      }
+      state.screens[screenID] = screenState
+    }
+
+    var placed: Set<CGWindowID> = []
+
+    for (screenIDStr, persistedScreen) in persisted.screens {
+      guard let screenID = UInt32(screenIDStr),
+            var screenState = state.screens[screenID] else { continue }
+
+      if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
+        screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
+      }
+
+      for (wsIDStr, persistedWS) in persistedScreen.workspaces {
+        guard let wsID = Int(wsIDStr),
+              wsID >= 1 && wsID <= workspaceCount,
+              var workspace = screenState.workspaces[wsID] else { continue }
+
+        var restoredColumns: [Column] = []
+        for persistedCol in persistedWS.columns {
+          let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
+          guard !liveWindows.isEmpty else { continue }
+          let mode: ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
+          let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
+          restoredColumns.append(Column(
+            windows: liveWindows,
+            focusedWindowIndex: clampedIdx,
+            mode: mode,
+            widthFraction: persistedCol.widthFraction
+          ))
+          placed.formUnion(liveWindows.map { $0.id })
+        }
+
+        workspace.columns = restoredColumns
+        workspace.focusedColumnIndex = restoredColumns.isEmpty
+          ? 0
+          : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+        screenState.workspaces[wsID] = workspace
+      }
+
+      state.screens[screenID] = screenState
+    }
+
+    let unplaced = windowPool.values.filter { !placed.contains($0.id) }
+    if !unplaced.isEmpty,
+       let screenID = activeScreenID(),
+       var screenState = state.screens[screenID],
+       var ws1 = screenState.workspaces[1] {
+      for window in unplaced {
+        ws1.columns.append(Column(
+          windows: [window],
+          focusedWindowIndex: 0,
+          widthFraction: layoutConfig.defaultColumnWidth
+        ))
+      }
+      if ws1.focusedColumnIndex >= ws1.columns.count {
+        ws1.focusedColumnIndex = max(0, ws1.columns.count - 1)
+      }
+      screenState.workspaces[1] = ws1
+      state.screens[screenID] = screenState
+    }
+
+    setNeedsRetile()
+    tiler_log("Restored state: \(placed.count) windows placed, \(windowPool.count - placed.count) unplaced")
   }
 
   // MARK: - Config
@@ -643,6 +733,7 @@ public class WindowManager {
     if membershipChanged {
       setNeedsRetile()
     }
+    if membershipChanged { needsSave = true }
 
     // Prune appliedWindows for windows no longer in state
     let liveGroupKeys = Set(
@@ -832,6 +923,7 @@ public class WindowManager {
   public func handleAction(_ action: Action) {
     let effects = Reducer.apply(action, to: &state, env: computeEnv())
     runEffects(effects)
+    needsSave = true
   }
 
 
