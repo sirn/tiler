@@ -7,6 +7,10 @@ public enum Action: Equatable {
   case moveColumnRight
   case focusWindowUp
   case focusWindowDown
+  case focusScreenPrevious
+  case focusScreenNext
+  case moveToScreenPrevious
+  case moveToScreenNext
   case moveWindowUp
   case moveWindowDown
   case focusWorkspace(Int)
@@ -18,6 +22,7 @@ public enum Action: Equatable {
   case toggleFullscreen
   case consumeOrExpelLeft
   case consumeOrExpelRight
+  case dumpFrameState
 
   /// Parse an action string with optional arguments.
   /// e.g. "focus_workspace" with args ["3"] → .focusWorkspace(3)
@@ -44,6 +49,11 @@ public enum Action: Equatable {
     case "toggle_fullscreen": return .toggleFullscreen
     case "consume_or_expel_left": return .consumeOrExpelLeft
     case "consume_or_expel_right": return .consumeOrExpelRight
+    case "focus_screen_previous": return .focusScreenPrevious
+    case "focus_screen_next": return .focusScreenNext
+    case "move_to_screen_previous": return .moveToScreenPrevious
+    case "move_to_screen_next": return .moveToScreenNext
+    case "dump_frame_state": return .dumpFrameState
     default: return nil
     }
   }
