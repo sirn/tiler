@@ -134,6 +134,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     bindings[.parse("ctrl+alt+bracketleft")!] = .consumeOrExpelLeft
     bindings[.parse("ctrl+alt+bracketright")!] = .consumeOrExpelRight
 
+    // Screen focus
+    bindings[.parse("ctrl+alt+p")!] = .focusScreenLeft
+    bindings[.parse("ctrl+alt+n")!] = .focusScreenRight
+
+    // Move to screen
+    bindings[.parse("ctrl+alt+shift+p")!] = .moveToScreenLeft
+    bindings[.parse("ctrl+alt+shift+n")!] = .moveToScreenRight
+
     return bindings
   }
 }
