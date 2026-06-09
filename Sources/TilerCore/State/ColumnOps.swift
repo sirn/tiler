@@ -6,23 +6,19 @@ public enum HorizontalDirection {
   case right
 }
 
-public struct ConsumeOrExpelResult: Equatable {
-  public let columns: [Column]
-  public let focusedColumnIndex: Int
-}
 
 /// niri-style consume-or-expel of the focused window in `direction`.
 /// - Stacked column (>1 window): EXPEL the focused window into its own new column on that side.
 /// - Lone window: CONSUME it into the neighboring column on that side (append to its stack),
 ///   removing the emptied source column.
-/// Returns nil for a no-op (empty/invalid, or consume with no neighbor on that side).
-public func consumeOrExpel(
-  columns: [Column], focusedColumnIndex: Int, direction: HorizontalDirection
-) -> ConsumeOrExpelResult? {
-  guard columns.indices.contains(focusedColumnIndex) else { return nil }
-  var cols = columns
+/// Returns false for a no-op (empty/invalid, or consume with no neighbor on that side).
+@discardableResult
+public func consumeOrExpel(_ workspace: inout Workspace, direction: HorizontalDirection) -> Bool {
+  let focusedColumnIndex = workspace.focusedColumnIndex
+  guard workspace.columns.indices.contains(focusedColumnIndex) else { return false }
+  var cols = workspace.columns
   let col = cols[focusedColumnIndex]
-  guard col.windows.indices.contains(col.focusedWindowIndex) else { return nil }
+  guard col.windows.indices.contains(col.focusedWindowIndex) else { return false }
   let winIdx = col.focusedWindowIndex
   let win = col.windows[winIdx]
 
@@ -36,16 +32,20 @@ public func consumeOrExpel(
       windows: [win], focusedWindowIndex: 0, mode: col.mode, widthFraction: col.widthFraction)
     let insertAt = direction == .left ? focusedColumnIndex : focusedColumnIndex + 1
     cols.insert(newCol, at: insertAt)
-    return ConsumeOrExpelResult(columns: cols, focusedColumnIndex: insertAt)
+    workspace.columns = cols
+    workspace.focusedColumnIndex = insertAt
+    return true
   } else {
     let targetIndex = direction == .left ? focusedColumnIndex - 1 : focusedColumnIndex + 1
-    guard cols.indices.contains(targetIndex) else { return nil }
+    guard cols.indices.contains(targetIndex) else { return false }
     cols.remove(at: focusedColumnIndex)
     let adjustedTarget = targetIndex > focusedColumnIndex ? targetIndex - 1 : targetIndex
     cols[adjustedTarget].windows.append(win)
     cols[adjustedTarget].focusedWindowIndex = cols[adjustedTarget].windows.count - 1
     cols[adjustedTarget].measuredMinWidth = nil
-    return ConsumeOrExpelResult(columns: cols, focusedColumnIndex: adjustedTarget)
+    workspace.columns = cols
+    workspace.focusedColumnIndex = adjustedTarget
+    return true
   }
 }
 
