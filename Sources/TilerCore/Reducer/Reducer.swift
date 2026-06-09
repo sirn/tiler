@@ -6,49 +6,6 @@ private let columnWidthMin: CGFloat = 0.2
 
 enum Reducer {
 
-  /// Operate on the active screen (derived from env). Mutates state and writes back.
-  /// Returns [] when there is no active screen.
-  private static func withActiveScreen(
-    _ state: inout TilerState, env: ReducerEnv,
-    _ body: (ScreenID, inout ScreenState) -> [Effect]
-  ) -> [Effect] {
-    guard let screenID = env.activeScreenID,
-          var screenState = state.screens[screenID] else { return [] }
-    let effects = body(screenID, &screenState)
-    state.screens[screenID] = screenState
-    return effects
-  }
-
-  /// Operate on the active workspace of the active screen (derived from state, not env).
-  /// Mutates state and writes back. Returns [] when there is no active screen or workspace.
-  private static func withActiveWorkspace(
-    _ state: inout TilerState, env: ReducerEnv,
-    _ body: (ScreenID, WorkspaceID, inout Workspace) -> [Effect]
-  ) -> [Effect] {
-    withActiveScreen(&state, env: env) { screenID, screenState in
-      let wsID = screenState.activeWorkspaceID
-      guard var ws = screenState.workspaces[wsID] else { return [] }
-      let effects = body(screenID, wsID, &ws)
-      screenState.workspaces[wsID] = ws
-      return effects
-    }
-  }
-
-  /// Operate on the focused column of the active workspace (derived from state).
-  /// Mutates state and writes back. Returns [] when there is no active screen, workspace,
-  /// or when the workspace has no columns.
-  private static func withFocusedColumn(
-    _ state: inout TilerState, env: ReducerEnv,
-    _ body: (ScreenID, WorkspaceID, inout Column) -> [Effect]
-  ) -> [Effect] {
-    withActiveWorkspace(&state, env: env) { screenID, wsID, ws in
-      guard !ws.columns.isEmpty else { return [] }
-      var col = ws.columns[ws.focusedColumnIndex]
-      let effects = body(screenID, wsID, &col)
-      ws.columns[ws.focusedColumnIndex] = col
-      return effects
-    }
-  }
   /// Returns the focused window from a column, or nil if index is out of bounds.
   private static func focusedWindow(in col: Column) -> WindowNode? {
     guard col.focusedWindowIndex < col.windows.count else { return nil }
@@ -68,21 +25,21 @@ enum Reducer {
   ) -> [Effect] {
     switch action {
     case .focusColumnLeft:
-      return withActiveWorkspace(&state, env: env) { screenID, wsID, ws in
+      return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
         guard ws.focusedColumnIndex > 0 else { return [] }
         ws.focusedColumnIndex -= 1
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .focusColumnRight:
-      return withActiveWorkspace(&state, env: env) { screenID, wsID, ws in
+      return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
         guard ws.focusedColumnIndex < ws.columns.count - 1 else { return [] }
         ws.focusedColumnIndex += 1
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .moveColumnLeft:
-      return withActiveWorkspace(&state, env: env) { _, _, ws in
+      return state.withActiveWorkspace(env: env) { _, _, ws in
         guard ws.focusedColumnIndex > 0 else { return [] }
         let idx = ws.focusedColumnIndex
         ws.columns.swapAt(idx, idx - 1)
@@ -91,7 +48,7 @@ enum Reducer {
       }
 
     case .moveColumnRight:
-      return withActiveWorkspace(&state, env: env) { _, _, ws in
+      return state.withActiveWorkspace(env: env) { _, _, ws in
         guard ws.focusedColumnIndex < ws.columns.count - 1 else { return [] }
         let idx = ws.focusedColumnIndex
         ws.columns.swapAt(idx, idx + 1)
@@ -100,21 +57,21 @@ enum Reducer {
       }
 
     case .focusWindowUp:
-      return withFocusedColumn(&state, env: env) { screenID, wsID, col in
+      return state.withFocusedColumn(env: env) { screenID, wsID, col in
         guard col.focusedWindowIndex > 0 else { return [] }
         col.focusedWindowIndex -= 1
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .focusWindowDown:
-      return withFocusedColumn(&state, env: env) { screenID, wsID, col in
+      return state.withFocusedColumn(env: env) { screenID, wsID, col in
         guard col.focusedWindowIndex < col.windows.count - 1 else { return [] }
         col.focusedWindowIndex += 1
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .moveWindowUp:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         guard col.focusedWindowIndex > 0 else { return [] }
         let idx = col.focusedWindowIndex
         col.windows.swapAt(idx, idx - 1)
@@ -123,7 +80,7 @@ enum Reducer {
       }
 
     case .moveWindowDown:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         guard col.focusedWindowIndex < col.windows.count - 1 else { return [] }
         let idx = col.focusedWindowIndex
         col.windows.swapAt(idx, idx + 1)
@@ -132,7 +89,7 @@ enum Reducer {
       }
 
     case .focusWorkspace(let n):
-      return withActiveScreen(&state, env: env) { screenID, screenState in
+      return state.withActiveScreen(env: env) { screenID, screenState in
         guard (1...env.workspaceCount).contains(n),
               screenState.activeWorkspaceID != n
         else { return [] }
@@ -142,7 +99,7 @@ enum Reducer {
       }
 
     case .moveToWorkspace(let n):
-      return withActiveScreen(&state, env: env) { _, screenState in
+      return state.withActiveScreen(env: env) { _, screenState in
         guard (1...env.workspaceCount).contains(n) else { return [] }
         let currentWSID = screenState.activeWorkspaceID
         guard currentWSID != n else { return [] }
@@ -188,31 +145,31 @@ enum Reducer {
       }
 
     case .increaseColumnWidth:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         adjustColumnWidth(&col, by: columnWidthIncrement)
         return [.retile]
       }
 
     case .decreaseColumnWidth:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         adjustColumnWidth(&col, by: -columnWidthIncrement)
         return [.retile]
       }
 
     case .toggleColumnTabbed:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         col.mode = (col.mode == .stack) ? .tab : .stack
         return [.retile]
       }
 
     case .closeWindow:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         guard let window = Self.focusedWindow(in: col) else { return [] }
         return [.closeWindow(window.id)]
       }
 
     case .toggleFullscreen:
-      return withFocusedColumn(&state, env: env) { _, _, col in
+      return state.withFocusedColumn(env: env) { _, _, col in
         guard let window = Self.focusedWindow(in: col) else { return [] }
         return [.toggleFullscreen(window.id)]
       }
@@ -231,14 +188,8 @@ enum Reducer {
     to state: inout TilerState,
     env: ReducerEnv
   ) -> [Effect] {
-    withActiveWorkspace(&state, env: env) { screenID, wsID, ws in
-      guard let result = consumeOrExpel(
-        columns: ws.columns,
-        focusedColumnIndex: ws.focusedColumnIndex,
-        direction: direction)
-      else { return [] }
-      ws.columns = result.columns
-      ws.focusedColumnIndex = result.focusedColumnIndex
+    state.withActiveWorkspace(env: env) { screenID, wsID, ws in
+      guard ws.consumeOrExpel(direction: direction) else { return [] }
       return [.refreshTabs(screenID, wsID), .scheduleDeferredTabRefresh(screenID, wsID), .retile]
     }
   }

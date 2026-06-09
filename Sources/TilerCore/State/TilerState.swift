@@ -21,4 +21,16 @@ public struct TilerState {
   public init(screens: [ScreenID: ScreenState] = [:]) {
     self.screens = screens
   }
+
+  mutating func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
+    for (screenID, var screenState) in screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        if workspace.swapBackingID(from: oldID, to: newID, title: title) {
+          screenState.workspaces[wsID] = workspace
+          screens[screenID] = screenState
+          return
+        }
+      }
+    }
+  }
 }

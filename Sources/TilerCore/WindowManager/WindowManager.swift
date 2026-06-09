@@ -800,16 +800,7 @@ public class WindowManager {
   /// Replace a managed window's id in-place (for native-tab active-window changes).
   /// The new node keeps the old node's position within its column.
   private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
-    for (screenID, var screenState) in state.screens {
-      for (wsID, var workspace) in screenState.workspaces {
-        if let newColumns = swapBackingID(in: workspace.columns, from: oldID, to: newID, title: title) {
-          workspace.columns = newColumns
-          screenState.workspaces[wsID] = workspace
-          state.screens[screenID] = screenState
-          return
-        }
-      }
-    }
+    state.swapWindowID(from: oldID, to: newID, title: title)
   }
 
   private func removeWindow(windowID: CGWindowID) {
