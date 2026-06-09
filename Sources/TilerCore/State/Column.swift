@@ -1,11 +1,11 @@
 import Foundation
 
-public enum ColumnMode: Equatable {
-  case stack
-  case tab
-}
-
 public struct Column: Identifiable, Equatable {
+  public enum ColumnMode: Equatable {
+    case stack
+    case tab
+  }
+
   public let id: UUID
   public var windows: [WindowNode]
   public var focusedWindowIndex: Int

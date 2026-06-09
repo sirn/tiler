@@ -27,7 +27,7 @@ final class ReducerTests: XCTestCase {
   }
 
   func makeWindowNode(id: UInt32, pid: pid_t = 42, title: String = "win") -> WindowNode {
-    WindowNode(id: id, groupKey: GroupKey(value: UInt64(id)), pid: pid, title: title)
+    WindowNode(id: id, groupKey: WindowNode.GroupKey(value: UInt64(id)), pid: pid, title: title)
   }
 
   func makeWindowStateWithWindows(windowCounts: [Int], focus: Int) -> TilerState {
