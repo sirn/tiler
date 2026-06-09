@@ -3,9 +3,8 @@ import XCTest
 
 final class ViewportCalcTests: XCTestCase {
 
-  // N=3, 0.5 fracs, focus col 2, starting from offset 0:
-  // right-flush brings col 2's right edge to U; visibleRange is derived from
-  // the final offset (not a pre-clamp page start).
+  // N=3, 0.5 fracs (totalWeight=1.5): normalization fits all 3 columns within U.
+  // offset=0, visibleRange=0..<3. Last column's right edge equals U.
   func testScrollRightNoSpill() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
     let screen = makeScreen()
@@ -14,14 +13,14 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    XCTAssertEqual(offset, 504, accuracy: 0.5)
-    XCTAssertEqual(range, 1..<3)
+    XCTAssertEqual(offset, 0, accuracy: 0.5)
+    XCTAssertEqual(range, 0..<3)
     // Last visible column's right edge must not exceed U
     let rightEdge = cols[range.upperBound - 1].right - offset
     XCTAssertEqual(rightEdge, 1000, accuracy: 0.01)
   }
 
-  // N=3, 0.5 fracs, focus col 1, already visible at offset 0 -> lazy, no scroll.
+  // N=3, 0.5 fracs (totalWeight=1.5): all 3 columns fit, focus col 1 already visible at offset 0.
   func testLazyFocusAlreadyVisible() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
     let screen = makeScreen()
@@ -34,8 +33,8 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertTrue(range.contains(1))
   }
 
-  // N=3, 0.5 fracs, focus col 0, current offset 492 (rightmost scroll):
-  // focus is left of vis={1,2} -> left-flush -> offset=0, col 0 visible.
+  // N=3, 0.5 fracs (totalWeight=1.5): all 3 columns fit, so any anchor clamps to offset=0.
+  // Focus col 0 is visible at offset 0.
   func testScrollLeftFlush() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 0)
     let screen = makeScreen()
@@ -48,8 +47,8 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertTrue(range.contains(0))
   }
 
-  // N=4, all frac=0.7: no two columns fit together.
-  // Focus col 3 (last) from offset 0 -> right-flush: col 3's right edge flushes to U.
+  // N=4, all frac=0.7 (totalWeight=2.8): normalization fits all 4 columns within U.
+  // offset=0, visibleRange=0..<4.
   func testDegenerateWideColumnRightFlush() {
     let ws = makeWorkspace(fractions: [0.7, 0.7, 0.7, 0.7], focus: 3)
     let screen = makeScreen()
@@ -58,17 +57,15 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    // With U=1000, widthBase=992, w=694: col3.right=2800, offset=1800
-    XCTAssertEqual(offset, 1800, accuracy: 1.0)
-    // Only focused column fits (0.7 frac = ~683 > half of U)
-    XCTAssertEqual(range, 3..<4)
-    // Right-flush: focused column's right edge must equal U within tolerance
+    // With normalization: totalWeight=2.8, each col=244, all 4 fit
+    XCTAssertEqual(offset, 0, accuracy: 1.0)
+    XCTAssertEqual(range, 0..<4)
+    // All columns fit: focused column's right edge equals U
     XCTAssertEqual(cols[3].right - offset, 1000, accuracy: 1.0)
   }
 
-  // Variable-width columns: focused col cannot left-flush past maxScroll.
-  // col0=600, col1=300, col2=300 (columnGaps=0). W=1200, U=1000, maxScroll=200.
-  // Focus=2 from offset 0 -> rightward -> packFromLeft clamps at maxScroll=200.
+  // Variable-width columns with normalization: (0.6,0.3,0.3), totalWeight=1.2, gap=0.
+  // col0=500, col1=250, col2=250; all fit within U=1000, so offset=0.
   func testVariableWidthScrollBoundary() {
     let ws = makeWorkspace(fractions: [0.6, 0.3, 0.3], focus: 2)
     let screen = makeScreen()
@@ -77,7 +74,7 @@ final class ViewportCalcTests: XCTestCase {
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (offset, range) = ViewportCalc.resolveOffset(
       anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U)
-    XCTAssertEqual(offset, 200, accuracy: 1.0)
+    XCTAssertEqual(offset, 0, accuracy: 1.0)
     XCTAssertTrue(range.contains(2))
     XCTAssertLessThanOrEqual(
       cols[range.upperBound - 1].right - offset, U + 0.01,
@@ -154,14 +151,14 @@ final class ViewportCalcTests: XCTestCase {
     }
   }
 
-  // After increasing col 0's width, the saved scrollOffset (492) is passed as
-  // currentOffset. The old visible range no longer contains focus, so resolveOffset
-  // must recompute and keep col 2 visible without exceeding maxScroll.
+  // After increasing col 0's width to 0.7, totalWeight=1.7; normalization refits
+  // all columns within ~U. The saved scroll offset is stale but resolveOffset
+  // recomputes and keeps col 2 visible without exceeding maxScroll.
   func testPostWidthChangeReflow() {
     var ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
     let screen = makeScreen()
     let gaps = makeGaps()
-    // Establish initial scroll position (right-flush col 2)
+    // Establish initial scroll position (all cols fit, offset=0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     let U = LayoutGeometry.usableWidth(screen, gaps)
     let (savedOffset, _) = ViewportCalc.resolveOffset(

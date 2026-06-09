@@ -3,12 +3,12 @@ import XCTest
 
 final class LayoutGeometryTests: XCTestCase {
 
-  // Single column: measuredMinWidth larger than computed width should win
+  // Two columns: col0 has measuredMinWidth larger than proportional width
+  // fractions [0.3, 0.7], gap=0, totalWeight=1.0, col0=300 → clamped to 400
   func testMinWidthSingleColumnAbsorbed() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 0)
-    // widthFraction=0.3 → requested=300, but measuredMinWidth=400 should override
-    let ws = makeWorkspaceWithMinWidths(fractions: [0.3], minWidths: [400], focus: 0)
+    let ws = makeWorkspaceWithMinWidths(fractions: [0.3, 0.7], minWidths: [400, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     XCTAssertEqual(cols[0].width, 400, accuracy: 1.0)
   }
@@ -17,8 +17,8 @@ final class LayoutGeometryTests: XCTestCase {
   func testMinWidthTwoColumnsNoOverlap() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 8)
-    // col0: fraction=0.3 → ~300 requested, but minWidth=500 overrides
-    // col1: fraction=0.3 → ~300
+    // col0: fraction=0.3 → ~496 requested (normalized), but minWidth=500 overrides
+    // col1: fraction=0.3 → ~496
     let ws = makeWorkspaceWithMinWidths(fractions: [0.3, 0.3], minWidths: [500, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
     XCTAssertEqual(cols[1].left, cols[0].right + 8, accuracy: 1.0)
@@ -41,20 +41,20 @@ final class LayoutGeometryTests: XCTestCase {
     XCTAssertLessThanOrEqual(cols[1].right - offset, U + 0.01)
   }
 
-  // Baseline: with measuredMinWidth == nil, columns output matches hardcoded expectation
+  // Baseline: with measuredMinWidth == nil, columns output matches proportional normalization
+  // 3 columns of 0.5 each: totalWeight=1.5, totalContent=984, each col=328
   func testMinWidthNilBaselineUnchanged() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 8)
-    // 3 columns of 0.5 each: widthBase = 1000 - 8 = 992; each col = round(992*0.5) = 496
     let ws = makeWorkspaceWithMinWidths(
       fractions: [0.5, 0.5, 0.5], minWidths: [nil, nil, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
-    XCTAssertEqual(cols[0].width, 496, accuracy: 1.0)
-    XCTAssertEqual(cols[1].width, 496, accuracy: 1.0)
-    XCTAssertEqual(cols[2].width, 496, accuracy: 1.0)
+    XCTAssertEqual(cols[0].width, 328, accuracy: 1.0)
+    XCTAssertEqual(cols[1].width, 328, accuracy: 1.0)
+    XCTAssertEqual(cols[2].width, 328, accuracy: 1.0)
     XCTAssertEqual(cols[0].left, 0, accuracy: 0.01)
-    XCTAssertEqual(cols[1].left, 504, accuracy: 1.0)  // 496 + 8
-    XCTAssertEqual(cols[2].left, 1008, accuracy: 1.0)  // 496 + 8 + 496 + 8
+    XCTAssertEqual(cols[1].left, 336, accuracy: 1.0)  // 328 + 8
+    XCTAssertEqual(cols[2].left, 672, accuracy: 1.0)  // 328 + 8 + 328 + 8
   }
 
   // Adjacent-pair no-overlap: cols[i].right + columnGaps <= cols[i+1].left for all i

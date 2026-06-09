@@ -17,18 +17,21 @@ public enum LayoutGeometry {
     let N = workspace.columns.count
     guard N > 0 else { return [] }
     let U = usableWidth(screen, gaps)
-    // Column width is a fraction of (U minus one column gap), independent of total
-    // column count. Fractions summing to 1.0 exactly fill the viewport: two 0.5
-    // columns plus one gap == U, leaving symmetric outer margins.
-    let widthBase = U - gaps.columnGaps
-    guard widthBase > 0 else {
-      // Degenerate: not enough space for gaps, give each column equal share of U
-      let w = U / CGFloat(N)
+
+    // Column width is proportional to widthFraction (CSS flex-grow style).
+    // Fractions do NOT need to sum to 1.0: they are normalized by totalWeight.
+    // E.g. three columns of 0.5 each (totalWeight=1.5) each get 1/3 of the
+    // available content space, filling the viewport exactly.
+    let totalWeight = workspace.columns.reduce(0.0) { $0 + $1.widthFraction }
+    let totalContent = U - CGFloat(N - 1) * gaps.columnGaps
+
+    guard totalWeight > 0, totalContent > 0 else {
+      let w = totalWeight <= 0 ? U / CGFloat(N) : min(U, totalContent) / CGFloat(N)
       var result: [ColumnLayout] = []
       var x: CGFloat = 0
-      for _ in 0..<N {
+      for i in 0..<N {
         result.append(ColumnLayout(left: x, width: w))
-        x += w
+        if i < N - 1 { x += w + gaps.columnGaps }
       }
       return result
     }
@@ -38,12 +41,10 @@ public enum LayoutGeometry {
     var result: [ColumnLayout] = []
     var x: CGFloat = 0
     for (i, col) in workspace.columns.enumerated() {
-      let requested = round(widthBase * col.widthFraction)
+      let requested = round(totalContent * col.widthFraction / totalWeight)
       let w = max(requested, col.measuredMinWidth ?? 0)
       result.append(ColumnLayout(left: x, width: w))
-      if i < N - 1 {
-        x += w + gaps.columnGaps
-      }
+      if i < N - 1 { x += w + gaps.columnGaps }
     }
     return result
   }
