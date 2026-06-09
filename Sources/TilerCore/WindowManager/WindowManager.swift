@@ -725,8 +725,8 @@ public class WindowManager {
 
     // Add new windows
     for wid in adjustedToAdd {
-      guard let (pid, title, _) = windowInfo[wid] else { continue }
-      addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title)
+      guard let (pid, title, bounds) = windowInfo[wid] else { continue }
+      addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
       membershipChanged = true
     }
 
@@ -769,7 +769,7 @@ public class WindowManager {
     return screenState.workspaces[screenState.activeWorkspaceID]
   }
 
-  private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String) {
+  private func addWindowToActiveWorkspace(windowID: CGWindowID, pid: pid_t, title: String, bounds: NSRect) {
     guard let screenID = activeScreenID(),
       let wsID = activeWorkspaceID(),
       var screenState = state.screens[screenID],
@@ -778,8 +778,15 @@ public class WindowManager {
 
     let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
 
+    // Preserve the window's current width as a fraction of usable viewport width.
+    // The only resizing scenario is consume/expel into an existing column.
+    let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
+    let widthFraction = usableWidth > 0
+        ? min(max(bounds.width / usableWidth, 0.1), 1.0)
+        : layoutConfig.defaultColumnWidth
+
     let column = Column(
-      windows: [node], focusedWindowIndex: 0, widthFraction: layoutConfig.defaultColumnWidth)
+      windows: [node], focusedWindowIndex: 0, widthFraction: widthFraction)
 
     if workspace.columns.isEmpty {
       workspace.columns = [column]

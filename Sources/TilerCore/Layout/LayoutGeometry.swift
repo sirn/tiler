@@ -17,33 +17,16 @@ public enum LayoutGeometry {
     let N = workspace.columns.count
     guard N > 0 else { return [] }
     let U = usableWidth(screen, gaps)
-    // Column width is a fraction of (U minus one column gap), independent of total
-    // column count. Fractions summing to 1.0 exactly fill the viewport: two 0.5
-    // columns plus one gap == U, leaving symmetric outer margins.
-    let widthBase = U - gaps.columnGaps
-    guard widthBase > 0 else {
-      // Degenerate: not enough space for gaps, give each column equal share of U
-      let w = U / CGFloat(N)
-      var result: [ColumnLayout] = []
-      var x: CGFloat = 0
-      for _ in 0..<N {
-        result.append(ColumnLayout(left: x, width: w))
-        x += w
-      }
-      return result
-    }
 
-    // Round each column's ideal width to nearest integer (avoids float drift).
-    // Absorb measured min-width so windows with OS-enforced minimums stay usable.
+    // widthFraction is an absolute proportion of U: 0.5 = 50% of viewport width.
+    // Fractions are not normalized — columns overflow the viewport, enabling scrolling.
     var result: [ColumnLayout] = []
     var x: CGFloat = 0
     for (i, col) in workspace.columns.enumerated() {
-      let requested = round(widthBase * col.widthFraction)
+      let requested = round(U * col.widthFraction)
       let w = max(requested, col.measuredMinWidth ?? 0)
       result.append(ColumnLayout(left: x, width: w))
-      if i < N - 1 {
-        x += w + gaps.columnGaps
-      }
+      if i < N - 1 { x += w + gaps.columnGaps }
     }
     return result
   }

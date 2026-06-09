@@ -130,7 +130,7 @@ enum Reducer {
         screenState.workspaces[currentWSID] = sourceWorkspace
 
         let newCol = Column(
-          windows: [window], focusedWindowIndex: 0, widthFraction: env.defaultColumnWidth)
+          windows: [window], focusedWindowIndex: 0, widthFraction: col.widthFraction)
         if targetWorkspace.columns.isEmpty {
           targetWorkspace.columns = [newCol]
           targetWorkspace.focusedColumnIndex = 0
