@@ -56,6 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Reconcile existing windows (enumerate + diff against empty state)
     wm.reconcile()
 
+    // Restore persisted workspace state
+    wm.restoreState()
+
     // Start the coalescing drain loop
     wm.start()
 
