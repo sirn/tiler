@@ -76,6 +76,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     self.hotkeyDispatcher = dispatcher
   }
 
+  func applicationWillTerminate(_ notification: Notification) {
+    windowManager?.saveState()
+  }
+
   // MARK: - Keybind helpers
 
   /// Convert config keybinds into HotkeyDispatcher bindings.
