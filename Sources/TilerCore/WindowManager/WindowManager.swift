@@ -229,26 +229,7 @@ public class WindowManager {
               wsID >= 1 && wsID <= workspaceCount,
               var workspace = screenState.workspaces[wsID] else { continue }
 
-        var restoredColumns: [Column] = []
-        for persistedCol in persistedWS.columns {
-          let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
-          guard !liveWindows.isEmpty else { continue }
-          let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
-          let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
-          restoredColumns.append(Column(
-            windows: liveWindows,
-            focusedWindowIndex: clampedIdx,
-            mode: mode,
-            widthFraction: persistedCol.widthFraction
-          ))
-          placed.formUnion(liveWindows.map { $0.id })
-        }
-
-        workspace.columns = restoredColumns
-        workspace.focusedColumnIndex = restoredColumns.isEmpty
-          ? 0
-          : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
-        screenState.workspaces[wsID] = workspace
+        restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
       }
 
       state.screens[screenID] = screenState
@@ -306,6 +287,33 @@ public class WindowManager {
 
     setNeedsRetile()
     tiler_log("Restored state: \(placed.count) windows placed, \(windowPool.count - placed.count) unplaced")
+  }
+
+  /// Restore columns into a workspace from a persisted workspace, tracking placed windows.
+  private func restoreColumns(
+    from persistedWS: PersistedWorkspace,
+    into workspace: inout Workspace,
+    windowPool: [CGWindowID: WindowNode],
+    placed: inout Set<CGWindowID>
+  ) {
+    var restoredColumns: [Column] = []
+    for persistedCol in persistedWS.columns {
+      let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
+      guard !liveWindows.isEmpty else { continue }
+      let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
+      let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
+      restoredColumns.append(Column(
+        windows: liveWindows,
+        focusedWindowIndex: clampedIdx,
+        mode: mode,
+        widthFraction: persistedCol.widthFraction
+      ))
+      placed.formUnion(liveWindows.map { $0.id })
+    }
+    workspace.columns = restoredColumns
+    workspace.focusedColumnIndex = restoredColumns.isEmpty
+      ? 0
+      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
   }
 
   // MARK: - Config
