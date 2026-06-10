@@ -88,7 +88,7 @@ final class ViewportCalcTests: XCTestCase {
   // Any-part-visible: a column overflowing the viewport right edge by a
   // sub-pixel margin (0.3pt) still overlaps the viewport, so it IS visible.
 
-  func testVisibleWithCenterBased_RightOverflow() {
+  func testVisibleWithAnyPart_RightOverflow() {
     let cols = [
       ColumnLayout(left: 0, width: 500),
       ColumnLayout(left: 500, width: 500.3),
@@ -99,7 +99,7 @@ final class ViewportCalcTests: XCTestCase {
   // Any-part-visible: a column starting before the viewport left edge
   // by a sub-pixel margin (-0.3) still overlaps the viewport, so it IS visible.
 
-  func testVisibleWithCenterBased_LeftOverflow() {
+  func testVisibleWithAnyPart_LeftOverflow() {
     let cols = [
       ColumnLayout(left: -0.3, width: 500),
       ColumnLayout(left: 500, width: 500),
@@ -119,7 +119,7 @@ final class ViewportCalcTests: XCTestCase {
   // Any-part-visible: right edge has float noise (1000+1e-8) but column
   // still overlaps viewport, so it IS visible.
 
-  func testVisibleWithCenterBased_RightFloatNoise() {
+  func testVisibleWithAnyPart_RightFloatNoise() {
     let cols = [ColumnLayout(left: 0, width: 1000 + 1e-8)]
     XCTAssertEqual(ViewportCalc.visibleAtOffset(cols, 0, 1000), 0..<1)
   }
