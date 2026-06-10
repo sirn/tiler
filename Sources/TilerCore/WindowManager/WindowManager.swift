@@ -258,7 +258,7 @@ public class WindowManager {
         unmatchedPersistedKeys.append(screenIDStr)
         continue
       }
-        matchedCurrentIDs.insert(screenID)
+      matchedCurrentIDs.insert(screenID)
 
       if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
         screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
@@ -334,6 +334,7 @@ public class WindowManager {
     tiler_log("Restored state: \(placed.count) windows placed, \(windowPool.count - placed.count) unplaced")
   }
 
+
   /// Restore columns into a workspace from a persisted workspace, tracking placed windows.
   private func restoreColumns(
     from persistedWS: PersistedWorkspace,
@@ -352,6 +353,7 @@ public class WindowManager {
         focusedWindowIndex: clampedIdx,
         mode: mode,
         widthFraction: persistedCol.widthFraction
+      ))
       ))
       placed.formUnion(liveWindows.map { $0.id })
     }
