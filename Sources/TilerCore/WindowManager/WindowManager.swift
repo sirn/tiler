@@ -544,7 +544,8 @@ public class WindowManager {
     // These windows have a valid axGetWindowID and tileable AX element but never
     // appear in CGWindowList, so the main CG loop above misses them entirely.
     let cgWindowIDs = Set(windowInfo.keys)
-    for pid in managedPIDs {
+    let cgPIDs = Set(windowInfo.values.map { $0.pid })
+    for pid in managedPIDs.union(cgPIDs) {
       let storedWids = windowStore.wids(for: pid)
       let orphanWids = storedWids.subtracting(cgWindowIDs)
       for wid in orphanWids {
@@ -553,6 +554,15 @@ public class WindowManager {
         if WindowFilter.isTileable(element) {
           tileableIDs.insert(wid)
           totalCandidates += 1
+          // Populate windowInfo so the add loop can add this orphan window
+          if windowInfo[wid] == nil {
+            var titleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            let axTitle = titleRef as? String ?? ""
+            if let axBounds = AXWindowBridge.currentFrame(for: element) {
+              windowInfo[wid] = (pid, axTitle, axBounds)
+            }
+          }
           tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
         } else {
           skippedNotTileable += 1
@@ -913,8 +923,7 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     tiler_debug(
-      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
-    )
+      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)")
   }
 
   /// Replace a managed window's id in-place (for native-tab active-window changes).
