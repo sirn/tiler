@@ -66,6 +66,9 @@ public class WindowManager {
   private let statePersistence = StatePersistence()
   private var needsSave = false
   private var reconcileTimer: Timer?
+  private var screenChangeObserver: NSObjectProtocol?
+  private var screenLockObserver: NSObjectProtocol?
+  private var screenUnlockObserver: NSObjectProtocol?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -82,9 +85,39 @@ public class WindowManager {
     eventBroker.onEvent = { [weak self] event in
       self?.handleEvent(event)
     }
+    screenChangeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.reconfigureScreens()
+    }
+    screenLockObserver = DistributedNotificationCenter.default().addObserver(
+      forName: NSNotification.Name("com.apple.screenIsLocked"),
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.screenDidLock()
+    }
+    screenUnlockObserver = DistributedNotificationCenter.default().addObserver(
+      forName: NSNotification.Name("com.apple.screenIsUnlocked"),
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.screenDidUnlock()
+    }
   }
 
   deinit {
+    if let obs = screenChangeObserver {
+      NotificationCenter.default.removeObserver(obs)
+    }
+    if let obs = screenLockObserver {
+      DistributedNotificationCenter.default().removeObserver(obs)
+    }
+    if let obs = screenUnlockObserver {
+      DistributedNotificationCenter.default().removeObserver(obs)
+    }
     stop()
   }
 
@@ -216,9 +249,16 @@ public class WindowManager {
 
     var placed: Set<CGWindowID> = []
 
+    var unmatchedPersistedKeys: [String] = []  // persisted screens that need position fallback
+    var matchedCurrentIDs: Set<ScreenID> = []  // current screens already restored by ID
+
     for (screenIDStr, persistedScreen) in persisted.screens {
       guard let screenID = UInt32(screenIDStr),
-            var screenState = state.screens[screenID] else { continue }
+            var screenState = state.screens[screenID] else {
+        unmatchedPersistedKeys.append(screenIDStr)
+        continue
+      }
+        matchedCurrentIDs.insert(screenID)
 
       if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
         screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
@@ -229,29 +269,45 @@ public class WindowManager {
               wsID >= 1 && wsID <= workspaceCount,
               var workspace = screenState.workspaces[wsID] else { continue }
 
-        var restoredColumns: [Column] = []
-        for persistedCol in persistedWS.columns {
-          let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
-          guard !liveWindows.isEmpty else { continue }
-          let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
-          let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
-          restoredColumns.append(Column(
-            windows: liveWindows,
-            focusedWindowIndex: clampedIdx,
-            mode: mode,
-            widthFraction: persistedCol.widthFraction
-          ))
-          placed.formUnion(liveWindows.map { $0.id })
-        }
-
-        workspace.columns = restoredColumns
-        workspace.focusedColumnIndex = restoredColumns.isEmpty
-          ? 0
-          : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+        restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
         screenState.workspaces[wsID] = workspace
       }
 
       state.screens[screenID] = screenState
+    }
+
+    // Fallback: match persisted screens that had no matching current screen ID
+    // by left-to-right position order (handles display ID changes after sleep/lock)
+    if !unmatchedPersistedKeys.isEmpty {
+      let availableCurrent = state.screens.keys
+        .filter { !matchedCurrentIDs.contains($0) }
+        .sorted {
+          (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
+          (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+        }
+      let orderedUnmatched = unmatchedPersistedKeys.sorted { (UInt32($0) ?? 0) < (UInt32($1) ?? 0) }
+
+      for (pIdx, screenIDStr) in orderedUnmatched.enumerated() {
+        guard pIdx < availableCurrent.count else { break }  // stop at bounds; excess become unplaced
+        guard let persistedScreen = persisted.screens[screenIDStr] else { continue }
+        let targetID = availableCurrent[pIdx]
+        guard var screenState = state.screens[targetID] else { continue }
+
+        if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
+          screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
+        }
+
+        for (wsIDStr, persistedWS) in persistedScreen.workspaces {
+          guard let wsID = Int(wsIDStr),
+                wsID >= 1 && wsID <= workspaceCount,
+                var workspace = screenState.workspaces[wsID] else { continue }
+
+          restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
+          screenState.workspaces[wsID] = workspace
+        }
+
+        state.screens[targetID] = screenState
+      }
     }
 
     let unplaced = windowPool.values.filter { !placed.contains($0.id) }
@@ -274,7 +330,35 @@ public class WindowManager {
     }
 
     setNeedsRetile()
+    needsSave = true
     tiler_log("Restored state: \(placed.count) windows placed, \(windowPool.count - placed.count) unplaced")
+  }
+
+  /// Restore columns into a workspace from a persisted workspace, tracking placed windows.
+  private func restoreColumns(
+    from persistedWS: PersistedWorkspace,
+    into workspace: inout Workspace,
+    windowPool: [CGWindowID: WindowNode],
+    placed: inout Set<CGWindowID>
+  ) {
+    var restoredColumns: [Column] = []
+    for persistedCol in persistedWS.columns {
+      let liveWindows = persistedCol.windowIDs.compactMap { windowPool[$0] }
+      guard !liveWindows.isEmpty else { continue }
+      let mode: Column.ColumnMode = persistedCol.mode == "tab" ? .tab : .stack
+      let clampedIdx = min(max(persistedCol.focusedWindowIndex, 0), liveWindows.count - 1)
+      restoredColumns.append(Column(
+        windows: liveWindows,
+        focusedWindowIndex: clampedIdx,
+        mode: mode,
+        widthFraction: persistedCol.widthFraction
+      ))
+      placed.formUnion(liveWindows.map { $0.id })
+    }
+    workspace.columns = restoredColumns
+    workspace.focusedColumnIndex = restoredColumns.isEmpty
+      ? 0
+      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
   }
 
   // MARK: - Config
@@ -460,7 +544,8 @@ public class WindowManager {
     // These windows have a valid axGetWindowID and tileable AX element but never
     // appear in CGWindowList, so the main CG loop above misses them entirely.
     let cgWindowIDs = Set(windowInfo.keys)
-    for pid in managedPIDs {
+    let cgPIDs = Set(windowInfo.values.map { $0.pid })
+    for pid in managedPIDs.union(cgPIDs) {
       let storedWids = windowStore.wids(for: pid)
       let orphanWids = storedWids.subtracting(cgWindowIDs)
       for wid in orphanWids {
@@ -469,6 +554,15 @@ public class WindowManager {
         if WindowFilter.isTileable(element) {
           tileableIDs.insert(wid)
           totalCandidates += 1
+          // Populate windowInfo so the add loop can add this orphan window
+          if windowInfo[wid] == nil {
+            var titleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            let axTitle = titleRef as? String ?? ""
+            if let axBounds = AXWindowBridge.currentFrame(for: element) {
+              windowInfo[wid] = (pid, axTitle, axBounds)
+            }
+          }
           tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
         } else {
           skippedNotTileable += 1
@@ -829,8 +923,7 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     tiler_debug(
-      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
-    )
+      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)")
   }
 
   /// Replace a managed window's id in-place (for native-tab active-window changes).
@@ -1349,6 +1442,94 @@ public class WindowManager {
         tiler_debug("Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx)")
         return
       }
+    }
+  }
+
+  // MARK: - Screen reconfiguration
+
+  private func reconfigureScreens() {
+    let current = NSScreen.screens
+
+    var newInfos: [ScreenID: ScreenInfo] = [:]
+    for screen in current {
+      guard let id = screen.displayID else { continue }
+      newInfos[id] = ScreenInfo(id: id, frame: screen.frame, visibleFrame: screen.visibleFrame)
+    }
+
+    guard !newInfos.isEmpty else {
+      tiler_log("reconfigureScreens: no screens have a display ID, preserving state")
+      return
+    }
+
+    var newMap: [ScreenID: ScreenState] = [:]
+    var usedOldIDs: Set<ScreenID> = []
+
+    // Pass 1: Exact ID match — preserve existing workspaces
+    for (newID, info) in newInfos {
+      if let existing = state.screens[newID] {
+        var transferred = existing
+        transferred.info = info
+        newMap[newID] = transferred
+        usedOldIDs.insert(newID)
+      }
+    }
+
+    // Pass 2: Position fallback for unmatched new screens
+    let unmatchedNew = newInfos.filter { newMap[$0.key] == nil }
+      .sorted { $0.value.visibleFrame.minX < $1.value.visibleFrame.minX }
+    let unmatchedOld = state.screens.keys
+      .filter { !usedOldIDs.contains($0) }
+      .sorted { (state.screens[$0]?.info.visibleFrame.minX ?? 0) < (state.screens[$1]?.info.visibleFrame.minX ?? 0) }
+
+    for (i, (newID, info)) in unmatchedNew.enumerated() {
+      if i < unmatchedOld.count, let oldState = state.screens[unmatchedOld[i]] {
+        var transferred = oldState
+        transferred.info = info
+        newMap[newID] = transferred
+        usedOldIDs.insert(unmatchedOld[i])
+        tiler_log("Screen ID changed: \(unmatchedOld[i]) -> \(newID)")
+      } else {
+        // Extra new screen — create empty workspaces
+        var workspaces: [WorkspaceID: Workspace] = [:]
+        for j in 1...workspaceCount { workspaces[j] = Workspace(id: j) }
+        newMap[newID] = ScreenState(info: info, workspaces: workspaces, activeWorkspaceID: 1)
+        tiler_log("New display: \(newID)")
+      }
+    }
+
+    // Log removed screens
+    for oldID in state.screens.keys where !usedOldIDs.contains(oldID) {
+      tiler_log("Display removed: \(oldID)")
+    }
+
+    state.screens = newMap
+    setNeedsReconcile()
+    setNeedsRetile()
+  }
+
+  public func saveState() {
+    statePersistence.save(state)
+  }
+
+  // MARK: - Screen lock handling
+
+  private func screenDidLock() {
+    tiler_log("Screen locked: pausing periodic reconcile")
+    reconcileTimer?.invalidate()
+    reconcileTimer = nil
+  }
+
+  private func screenDidUnlock() {
+    tiler_log("Screen unlocked: resuming periodic reconcile, forcing layout refresh")
+    if reconcileTimer == nil {
+      reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        self?.setNeedsReconcile()
+      }
+    }
+    setNeedsReconcile()
+    // Defer retile to let display geometry and AX elements settle after unlock
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.setNeedsRetile()
     }
   }
 }
