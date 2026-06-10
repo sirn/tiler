@@ -21,7 +21,8 @@ public class WindowManager {
   public var gaps: GapConfig
   public var workspaceCount: Int
   public var layoutConfig: LayoutConfig
-
+  public var minWindowWidth: CGFloat
+  public var minWindowHeight: CGFloat
 
   public let windowStore = WindowStore()
 
@@ -79,6 +80,8 @@ public class WindowManager {
     )
     self.workspaceCount = config.workspaces.count
     self.layoutConfig = config.layout
+    self.minWindowWidth = config.general.minWindowWidth
+    self.minWindowHeight = config.general.minWindowHeight
 
     self.eventBroker = eventBroker
 
@@ -510,7 +513,13 @@ public class WindowManager {
 
       if let element = windowStore.element(for: wid) {
         if WindowFilter.isTileable(element) {
-          tileableIDs.insert(wid)
+          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
+          if bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
+            tileableIDs.insert(wid)
+          } else {
+            notTileableCandidates.insert(wid)
+            tiler_debug("reconcile: skip small window wid=\(wid) title='\(title)' size=\(Int(bounds.width))x\(Int(bounds.height))")
+          }
         } else {
           skippedNotTileable += 1
           notTileableCandidates.insert(wid)
@@ -536,7 +545,6 @@ public class WindowManager {
         guard !tileableIDs.contains(wid), let element = windowStore.element(for: wid)
         else { continue }
         if WindowFilter.isTileable(element) {
-          tileableIDs.insert(wid)
           totalCandidates += 1
           // Populate windowInfo so the add loop can add this orphan window
           if windowInfo[wid] == nil {
@@ -554,7 +562,13 @@ public class WindowManager {
               windowInfo[wid] = (pid, axTitle, tlBounds)
             }
           }
-          tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
+          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
+          if let info = windowInfo[wid], info.bounds.width >= minWindowWidth && info.bounds.height >= minWindowHeight {
+            tileableIDs.insert(wid)
+            tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
+          } else {
+            tiler_debug("reconcile: skip small ax-orphan wid=\(wid) pid=\(pid)")
+          }
         } else {
           skippedNotTileable += 1
           tiler_debug("reconcile: ax-orphan not-tileable wid=\(wid) pid=\(pid)")
@@ -651,8 +665,13 @@ public class WindowManager {
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
       if WindowFilter.isTileable(element) {
-        tileableIDs.insert(wid)
-        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
+        if let bounds = windowInfo[wid]?.bounds, bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
+          tileableIDs.insert(wid)
+          tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
+        } else {
+          notTileableCandidates.insert(wid)
+          tiler_debug("reconcile: skip small position-resolved wid=\(wid) pid=\(info.pid)")
+        }
       } else {
         notTileableCandidates.insert(wid)
         tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
