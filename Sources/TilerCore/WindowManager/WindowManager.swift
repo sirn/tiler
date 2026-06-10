@@ -254,6 +254,37 @@ public class WindowManager {
       state.screens[screenID] = screenState
     }
 
+    // Fallback: screen IDs changed (e.g. after lock/unlock); match by left-to-right order
+    if placed.isEmpty && !persisted.screens.isEmpty {
+      let orderedCurrent = state.screens.keys.sorted {
+        (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
+        (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+      }
+      let orderedPersisted = persisted.screens.keys.sorted { $0 < $1 }
+
+      for (pIdx, screenIDStr) in orderedPersisted.enumerated() {
+        guard let persistedScreen = persisted.screens[screenIDStr] else { continue }
+        let targetID = pIdx < orderedCurrent.count
+          ? orderedCurrent[pIdx]
+          : (orderedCurrent.last ?? orderedCurrent.first ?? 0)
+        guard var screenState = state.screens[targetID] else { continue }
+
+        if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
+          screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
+        }
+
+        for (wsIDStr, persistedWS) in persistedScreen.workspaces {
+          guard let wsID = Int(wsIDStr),
+                wsID >= 1 && wsID <= workspaceCount,
+                var workspace = screenState.workspaces[wsID] else { continue }
+
+          restoreColumns(from: persistedWS, into: &workspace, windowPool: windowPool, placed: &placed)
+        }
+
+        state.screens[targetID] = screenState
+      }
+    }
+
     let unplaced = windowPool.values.filter { !placed.contains($0.id) }
     if !unplaced.isEmpty,
        let screenID = activeScreenID(),
