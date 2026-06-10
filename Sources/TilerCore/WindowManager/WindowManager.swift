@@ -431,26 +431,10 @@ public class WindowManager {
       windowStore.forget(pid: pid)
       removeWindowsForPID(pid)
       setNeedsRetile()
-    case .windowCreated(let element):
-      var pid: pid_t = 0
-      AXUIElementGetPid(element, &pid)
-      if let wid = windowStore.windowID(for: element),
-         WindowFilter.isTileable(element) {
-        windowStore.register(wid: wid, element: element, pid: pid)
-      }
+    case .windowCreated:
       setNeedsReconcile()
-    case .windowDestroyed(let element):
-      // Use the notification element directly to find the window ID.
-      // CGWindowList can lag behind AX destruction, so we can't trust the
-      // reconcile-based reaping for prompt removal.
-      let wid = windowStore.windowID(for: element)
-             ?? windowStore.windowIDByIdentity(for: element)
-      if let wid = wid {
-        removeWindow(windowID: wid)
-        setNeedsRetile()
-      } else {
-        setNeedsReconcile()
-      }
+    case .windowDestroyed:
+      setNeedsReconcile()
     case .windowMinimized:
       setNeedsReconcile()
     case .windowDeminimized:
@@ -560,7 +544,14 @@ public class WindowManager {
             AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
             let axTitle = titleRef as? String ?? ""
             if let axBounds = AXWindowBridge.currentFrame(for: element) {
-              windowInfo[wid] = (pid, axTitle, axBounds)
+              // Convert from cocoa (bottom-left) to top-left for consistent windowInfo format
+              let screenHeight = AXWindowBridge.primaryScreenHeight()
+              let tlBounds = NSRect(
+                x: axBounds.minX,
+                y: screenHeight - axBounds.minY - axBounds.height,
+                width: axBounds.width,
+                height: axBounds.height)
+              windowInfo[wid] = (pid, axTitle, tlBounds)
             }
           }
           tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
