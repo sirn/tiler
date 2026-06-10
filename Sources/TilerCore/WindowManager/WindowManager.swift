@@ -66,6 +66,7 @@ public class WindowManager {
   private let statePersistence = StatePersistence()
   private var needsSave = false
   private var reconcileTimer: Timer?
+  private var screenChangeObserver: NSObjectProtocol?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -81,6 +82,13 @@ public class WindowManager {
 
     eventBroker.onEvent = { [weak self] event in
       self?.handleEvent(event)
+    }
+    screenChangeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.reconfigureScreens()
     }
   }
 
@@ -99,6 +107,10 @@ public class WindowManager {
   public func stop() {
     reconcileTimer?.invalidate()
     reconcileTimer = nil
+    if let obs = screenChangeObserver {
+      NotificationCenter.default.removeObserver(obs)
+      screenChangeObserver = nil
+    }
   }
 
   // MARK: - Coalescing drain
@@ -216,9 +228,14 @@ public class WindowManager {
 
     var placed: Set<CGWindowID> = []
 
+    var unmatchedPersistedKeys: [String] = []  // screens that need position fallback
+
     for (screenIDStr, persistedScreen) in persisted.screens {
       guard let screenID = UInt32(screenIDStr),
-            var screenState = state.screens[screenID] else { continue }
+            var screenState = state.screens[screenID] else {
+        unmatchedPersistedKeys.append(screenIDStr)
+        continue
+      }
 
       if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
         screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
@@ -235,15 +252,16 @@ public class WindowManager {
       state.screens[screenID] = screenState
     }
 
-    // Fallback: screen IDs changed (e.g. after lock/unlock); match by left-to-right order
-    if placed.isEmpty && !persisted.screens.isEmpty {
+    // Fallback: match persisted screens that had no matching current screen ID
+    // by left-to-right position order (handles display ID changes after sleep/lock)
+    if !unmatchedPersistedKeys.isEmpty {
       let orderedCurrent = state.screens.keys.sorted {
         (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
         (state.screens[$1]?.info.visibleFrame.minX ?? 0)
       }
-      let orderedPersisted = persisted.screens.keys.sorted { $0 < $1 }
+      let orderedUnmatched = unmatchedPersistedKeys.sorted { $0 < $1 }
 
-      for (pIdx, screenIDStr) in orderedPersisted.enumerated() {
+      for (pIdx, screenIDStr) in orderedUnmatched.enumerated() {
         guard let persistedScreen = persisted.screens[screenIDStr] else { continue }
         let targetID = pIdx < orderedCurrent.count
           ? orderedCurrent[pIdx]
@@ -1360,5 +1378,50 @@ public class WindowManager {
         return
       }
     }
+  }
+
+  // MARK: - Screen reconfiguration
+
+  private func reconfigureScreens() {
+    let current = NSScreen.screens
+    let newOrdered = current.sorted { $0.visibleFrame.minX < $1.visibleFrame.minX }
+    let oldOrdered = state.screens.keys.sorted {
+      (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
+      (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+    }
+
+    var newMap: [ScreenID: ScreenState] = [:]
+    var usedOldIDs: Set<ScreenID> = []
+
+    for (i, newScreen) in newOrdered.enumerated() {
+      guard let newID = newScreen.displayID else { continue }
+      let info = ScreenInfo(id: newID, frame: newScreen.frame, visibleFrame: newScreen.visibleFrame)
+
+      if i < oldOrdered.count, let oldScreenState = state.screens[oldOrdered[i]] {
+        // Transfer workspace state from old screen at this position
+        usedOldIDs.insert(oldOrdered[i])
+        var transferred = oldScreenState
+        transferred.info = info
+        newMap[newID] = transferred
+        if newID != oldOrdered[i] {
+          tiler_log("Screen ID changed at position \(i): \(oldOrdered[i]) -> \(newID)")
+        }
+      } else {
+        // New screen at this position (e.g., external display connected while locked)
+        var workspaces: [WorkspaceID: Workspace] = [:]
+        for j in 1...workspaceCount { workspaces[j] = Workspace(id: j) }
+        newMap[newID] = ScreenState(info: info, workspaces: workspaces, activeWorkspaceID: 1)
+        tiler_log("New display at position \(i): \(newID)")
+      }
+    }
+
+    // Log old screens that were removed (e.g., external display disconnected while locked)
+    for (oldID, _) in state.screens where !usedOldIDs.contains(oldID) {
+      tiler_log("Display removed during reconfigure: \(oldID)")
+    }
+
+    state.screens = newMap
+    setNeedsReconcile()
+    setNeedsRetile()
   }
 }
