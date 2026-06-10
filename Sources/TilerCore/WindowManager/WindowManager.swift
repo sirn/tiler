@@ -544,7 +544,8 @@ public class WindowManager {
     // These windows have a valid axGetWindowID and tileable AX element but never
     // appear in CGWindowList, so the main CG loop above misses them entirely.
     let cgWindowIDs = Set(windowInfo.keys)
-    for pid in managedPIDs {
+    let cgPIDs = Set(windowInfo.values.map { $0.pid })
+    for pid in managedPIDs.union(cgPIDs) {
       let storedWids = windowStore.wids(for: pid)
       let orphanWids = storedWids.subtracting(cgWindowIDs)
       for wid in orphanWids {
