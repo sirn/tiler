@@ -554,6 +554,15 @@ public class WindowManager {
         if WindowFilter.isTileable(element) {
           tileableIDs.insert(wid)
           totalCandidates += 1
+          // Populate windowInfo so the add loop can add this orphan window
+          if windowInfo[wid] == nil {
+            var titleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            let axTitle = titleRef as? String ?? ""
+            if let axBounds = AXWindowBridge.currentFrame(for: element) {
+              windowInfo[wid] = (pid, axTitle, axBounds)
+            }
+          }
           tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
         } else {
           skippedNotTileable += 1
@@ -863,8 +872,37 @@ public class WindowManager {
 
     let node = WindowNode(id: windowID, groupKey: mintGroupKey(), pid: pid, title: title)
 
+    // Native tab merge: windows of the same PID sharing the same frame
+    // (background tabs stacked behind the active tab) belong in one tab column.
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
+    let cocoaBounds = NSRect(
+      x: bounds.minX,
+      y: screenHeight - bounds.minY - bounds.height,
+      width: bounds.width,
+      height: bounds.height)
+    for idx in workspace.columns.indices {
+      let col = workspace.columns[idx]
+      guard let firstWin = col.windows.first(where: { $0.pid == pid }) else { continue }
+      let existingFrame: NSRect?
+      if let element = windowStore.element(for: firstWin.id) {
+        existingFrame = AXWindowBridge.currentFrame(for: element)
+      } else if let gk = groupKey(forID: firstWin.id), let applied = appliedWindows[gk]?.frame {
+        existingFrame = applied
+      } else {
+        existingFrame = nil
+      }
+      if let existingFrame = existingFrame,
+         AXWindowBridge.framesMatch(cocoaBounds, existingFrame, tolerance: 10) {
+        workspace.columns[idx].windows.append(node)
+        if workspace.columns[idx].mode == .stack { workspace.columns[idx].mode = .tab }
+        screenState.workspaces[wsID] = workspace
+        state.screens[screenID] = screenState
+        tiler_debug("Tab-merged window \(windowID) into column \(idx)")
+        return
+      }
+    }
+
     // Preserve the window's current width as a fraction of usable viewport width.
-    // The only resizing scenario is consume/expel into an existing column.
     let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
     let widthFraction = usableWidth > 0
         ? min(max(bounds.width / usableWidth, 0.1), 1.0)
@@ -885,8 +923,7 @@ public class WindowManager {
     screenState.workspaces[wsID] = workspace
     state.screens[screenID] = screenState
     tiler_debug(
-      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)"
-    )
+      "Added window \(windowID) (\(title)) to workspace \(wsID) column \(workspace.focusedColumnIndex)")
   }
 
   /// Replace a managed window's id in-place (for native-tab active-window changes).
