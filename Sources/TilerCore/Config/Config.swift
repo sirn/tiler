@@ -41,17 +41,23 @@ public struct GeneralConfig: Codable {
   public var outerGaps: CGFloat
   public var innerGaps: CGFloat
   public var columnGaps: CGFloat
+  public var minWindowWidth: CGFloat
+  public var minWindowHeight: CGFloat
 
-  public init(outerGaps: CGFloat = 8, innerGaps: CGFloat = 6, columnGaps: CGFloat = 8) {
+  public init(outerGaps: CGFloat = 8, innerGaps: CGFloat = 6, columnGaps: CGFloat = 8, minWindowWidth: CGFloat = 300, minWindowHeight: CGFloat = 250) {
     self.outerGaps = outerGaps
     self.innerGaps = innerGaps
     self.columnGaps = columnGaps
+    self.minWindowWidth = minWindowWidth
+    self.minWindowHeight = minWindowHeight
   }
 
   enum CodingKeys: String, CodingKey {
     case outerGaps = "outer_gaps"
     case innerGaps = "inner_gaps"
     case columnGaps = "column_gaps"
+    case minWindowWidth = "min_window_width"
+    case minWindowHeight = "min_window_height"
   }
 }
 
