@@ -1477,6 +1477,8 @@ public class WindowManager {
           "correct: wid=\(wid) gave up after 3 tries — observed=\(observed) intended=\(record.frame)")
         if observed.width > record.frame.width + 2.0 {
           absorbMinWidth(wid: wid, observedWidth: observed.width)
+        } else if observed.height > record.frame.height + 2.0 {
+          absorbMinHeight(wid: wid, observedHeight: observed.height)
         } else {
           appliedWindows[gk]?.frame = observed
         }
@@ -1499,6 +1501,24 @@ public class WindowManager {
           state.screens[screenID] = screenState
           setNeedsRetile()
           tiler_debug("Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx) on screen \(screenID)")
+          return
+        }
+      }
+    }
+  }
+
+  private func absorbMinHeight(wid: CGWindowID, observedHeight: CGFloat) {
+    for (screenID, var screenState) in state.screens {
+      let wsID = screenState.activeWorkspaceID
+      guard var workspace = screenState.workspaces[wsID] else { continue }
+      for colIdx in workspace.columns.indices {
+        if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          workspace.columns[colIdx].measuredMinHeight = max(
+            workspace.columns[colIdx].measuredMinHeight ?? 0, observedHeight)
+          screenState.workspaces[wsID] = workspace
+          state.screens[screenID] = screenState
+          setNeedsRetile()
+          tiler_debug("Absorbed min-height \(observedHeight) for wid=\(wid) in col \(colIdx) on screen \(screenID)")
           return
         }
       }
