@@ -70,6 +70,7 @@ public class WindowManager {
   private var screenChangeObserver: NSObjectProtocol?
   private var screenLockObserver: NSObjectProtocol?
   private var screenUnlockObserver: NSObjectProtocol?
+  private var focusedScreenID: ScreenID?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -860,27 +861,45 @@ public class WindowManager {
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-    guard let wid = windowStore.windowID(for: element) else { return }
+    guard let wid = windowStore.windowID(for: element) else {
+      if let axFrame = AXWindowBridge.currentFrame(for: element) {
+        let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+        focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
+      }
+      return
+    }
     updateFocus(windowID: wid)
   }
 
   // MARK: - State mutations
 
   private func activeScreenID() -> ScreenID? {
+    if let id = focusedScreenID, state.screens[id] != nil {
+      return id
+    }
     if let keyWindowScreen = NSScreen.main ?? NSScreen.screens.first {
-      return keyWindowScreen.displayID ?? CGMainDisplayID()
+      let screenID = keyWindowScreen.displayID ?? CGMainDisplayID()
+      if state.screens[screenID] != nil {
+        return screenID
+      }
     }
     return state.screens.keys.first ?? CGMainDisplayID()
   }
 
   private func orderedScreenIDs() -> [ScreenID] {
     state.screens.keys.sorted {
-      (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
-      (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+      let a = state.screens[$0]?.info.visibleFrame ?? .zero
+      let b = state.screens[$1]?.info.visibleFrame ?? .zero
+      return a.minX != b.minX ? a.minX < b.minX : a.minY < b.minY
     }
   }
 
   private func screenID(for bounds: NSRect) -> ScreenID? {
+    // Prefer the focused screen so new windows appear on the screen
+    // the user is currently working on, not where macOS placed them.
+    if let focusedID = focusedScreenID, state.screens[focusedID] != nil {
+      return focusedID
+    }
     let mid = NSPoint(x: bounds.midX, y: bounds.midY)
     for (id, ss) in state.screens where ss.info.visibleFrame.contains(mid) {
       return id
@@ -1046,6 +1065,7 @@ public class WindowManager {
             workspace.focusedColumnIndex = colIdx
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
+            focusedScreenID = screenID
             return
           }
         }
@@ -1103,6 +1123,7 @@ public class WindowManager {
         guard let screenState = state.screens[screenID],
               let workspace = screenState.workspaces[wsID]
         else { break }
+        focusedScreenID = screenID
         focusFocusedWindow(in: workspace)
       case .closeWindow(let windowID):
         guard let element = windowStore.element(for: windowID) else { break }

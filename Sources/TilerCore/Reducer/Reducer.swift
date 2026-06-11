@@ -176,7 +176,7 @@ enum Reducer {
         return [.retile, .log("Moved window to workspace \(n)")]
       }
 
-    case .focusScreenLeft:
+    case .focusScreenPrevious:
       if let screenID = env.activeScreenID,
          let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
          env.orderedScreenIDs.count > 1 {
@@ -189,7 +189,7 @@ enum Reducer {
       }
       return []
 
-    case .focusScreenRight:
+    case .focusScreenNext:
       if let screenID = env.activeScreenID,
          let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
          env.orderedScreenIDs.count > 1 {
@@ -202,7 +202,7 @@ enum Reducer {
       }
       return []
 
-    case .moveToScreenLeft:
+    case .moveToScreenPrevious:
       guard let screenID = env.activeScreenID,
             let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
             env.orderedScreenIDs.count > 1
@@ -266,7 +266,7 @@ enum Reducer {
 
       return sourceEffects + targetEffects
 
-    case .moveToScreenRight:
+    case .moveToScreenNext:
       guard let screenID = env.activeScreenID,
             let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
             env.orderedScreenIDs.count > 1
