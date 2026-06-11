@@ -70,6 +70,7 @@ public class WindowManager {
   private var screenChangeObserver: NSObjectProtocol?
   private var screenLockObserver: NSObjectProtocol?
   private var screenUnlockObserver: NSObjectProtocol?
+  private var focusedScreenID: ScreenID?
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -297,8 +298,9 @@ public class WindowManager {
       let availableCurrent = state.screens.keys
         .filter { !matchedCurrentIDs.contains($0) }
         .sorted {
-          (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
-          (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+          let a = state.screens[$0]?.info.visibleFrame ?? .zero
+          let b = state.screens[$1]?.info.visibleFrame ?? .zero
+          return a.minX != b.minX ? a.minX < b.minX : a.minY < b.minY
         }
       let orderedUnmatched = unmatchedPersistedKeys.sorted { (UInt32($0) ?? 0) < (UInt32($1) ?? 0) }
 
@@ -860,27 +862,45 @@ public class WindowManager {
   }
 
   private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-    guard let wid = windowStore.windowID(for: element) else { return }
+    guard let wid = windowStore.windowID(for: element) else {
+      if let axFrame = AXWindowBridge.currentFrame(for: element) {
+        let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+        focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
+      }
+      return
+    }
     updateFocus(windowID: wid)
   }
 
   // MARK: - State mutations
 
   private func activeScreenID() -> ScreenID? {
+    if let id = focusedScreenID, state.screens[id] != nil {
+      return id
+    }
     if let keyWindowScreen = NSScreen.main ?? NSScreen.screens.first {
-      return keyWindowScreen.displayID ?? CGMainDisplayID()
+      let screenID = keyWindowScreen.displayID ?? CGMainDisplayID()
+      if state.screens[screenID] != nil {
+        return screenID
+      }
     }
     return state.screens.keys.first ?? CGMainDisplayID()
   }
 
   private func orderedScreenIDs() -> [ScreenID] {
     state.screens.keys.sorted {
-      (state.screens[$0]?.info.visibleFrame.minX ?? 0) <
-      (state.screens[$1]?.info.visibleFrame.minX ?? 0)
+      let a = state.screens[$0]?.info.visibleFrame ?? .zero
+      let b = state.screens[$1]?.info.visibleFrame ?? .zero
+      return a.minX != b.minX ? a.minX < b.minX : a.minY < b.minY
     }
   }
 
   private func screenID(for bounds: NSRect) -> ScreenID? {
+    // Prefer the focused screen so new windows appear on the screen
+    // the user is currently working on, not where macOS placed them.
+    if let focusedID = focusedScreenID, state.screens[focusedID] != nil {
+      return focusedID
+    }
     let mid = NSPoint(x: bounds.midX, y: bounds.midY)
     for (id, ss) in state.screens where ss.info.visibleFrame.contains(mid) {
       return id
@@ -1046,6 +1066,7 @@ public class WindowManager {
             workspace.focusedColumnIndex = colIdx
             screenState.workspaces[wsID] = workspace
             state.screens[screenID] = screenState
+            focusedScreenID = screenID
             return
           }
         }
@@ -1080,6 +1101,10 @@ public class WindowManager {
   // MARK: - Action handling
 
   public func handleAction(_ action: Action) {
+    if case .dumpFrameState = action {
+      dumpFrameDiagnostics()
+      return
+    }
     let effects = Reducer.apply(action, to: &state, env: computeEnv())
     runEffects(effects)
     needsSave = true
@@ -1103,6 +1128,7 @@ public class WindowManager {
         guard let screenState = state.screens[screenID],
               let workspace = screenState.workspaces[wsID]
         else { break }
+        focusedScreenID = screenID
         focusFocusedWindow(in: workspace)
       case .closeWindow(let windowID):
         guard let element = windowStore.element(for: windowID) else { break }
@@ -1510,10 +1536,16 @@ public class WindowManager {
 
     // Pass 2: Position fallback for unmatched new screens
     let unmatchedNew = newInfos.filter { newMap[$0.key] == nil }
-      .sorted { $0.value.visibleFrame.minX < $1.value.visibleFrame.minX }
+      .sorted { $0.value.visibleFrame.minX != $1.value.visibleFrame.minX
+        ? $0.value.visibleFrame.minX < $1.value.visibleFrame.minX
+        : $0.value.visibleFrame.minY < $1.value.visibleFrame.minY }
     let unmatchedOld = state.screens.keys
       .filter { !usedOldIDs.contains($0) }
-      .sorted { (state.screens[$0]?.info.visibleFrame.minX ?? 0) < (state.screens[$1]?.info.visibleFrame.minX ?? 0) }
+      .sorted {
+        let a = state.screens[$0]?.info.visibleFrame ?? .zero
+        let b = state.screens[$1]?.info.visibleFrame ?? .zero
+        return a.minX != b.minX ? a.minX < b.minX : a.minY < b.minY
+      }
 
     for (i, (newID, info)) in unmatchedNew.enumerated() {
       if i < unmatchedOld.count, let oldState = state.screens[unmatchedOld[i]] {
@@ -1564,6 +1596,35 @@ public class WindowManager {
     // Defer retile to let display geometry and AX elements settle after unlock
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.setNeedsRetile()
+    }
+  }
+
+  private func dumpFrameDiagnostics() {
+    let screenH = AXWindowBridge.primaryScreenHeight()
+    tiler_log("[diagnostics] primaryScreenHeight=\(screenH) screens=\(state.screens.count)")
+    for (sid, sst) in state.screens {
+      let info = sst.info
+      let og = gaps.outerGaps
+      let usableRect = NSRect(
+        x: info.visibleFrame.minX + og,
+        y: info.visibleFrame.minY + og,
+        width: max(0, info.visibleFrame.width - 2 * og),
+        height: max(0, info.visibleFrame.height - 2 * og))
+      tiler_log("[diagnostics] screen=\(sid) frame=\(info.frame) visible=\(info.visibleFrame) usable=\(usableRect)")
+      let ws = sst.workspaces[sst.activeWorkspaceID]
+      guard let ws else { continue }
+      for (ci, col) in ws.columns.enumerated() {
+        tiler_log("[diagnostics]   col[\(ci)] mode=\(col.mode) wf=\(col.widthFraction) count=\(col.windows.count)")
+        for node in col.windows {
+          let target = appliedWindows[node.groupKey]?.frame
+          let actual = windowStore.element(for: node.id).flatMap { AXWindowBridge.currentFrame(for: $0) }
+          var flags = [String]()
+          if let t = target, t.minY < info.visibleFrame.minY { flags.append("BELOW visibleFrame.minY") }
+          if let t = target, t.minY + t.height > info.visibleFrame.maxY { flags.append("ABOVE visibleFrame.maxY") }
+          let flagStr = flags.isEmpty ? "" : " *** \(flags.joined(separator: ", ")) ***"
+          tiler_log("[diagnostics]     wid=\(node.id) pid=\(node.pid) target=\(String(describing: target)) actual=\(String(describing: actual))\(flagStr)")
+        }
+      }
     }
   }
 }
