@@ -64,10 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Set up hotkey dispatcher
     let dispatcher = HotkeyDispatcher()
-    let bindings =
-      config.keybinds.isEmpty
-      ? defaultKeybindings
-      : keybindingsFromConfig(config.keybinds)
+    let bindings = defaultKeybindings.merging(keybindingsFromConfig(config.keybinds)) { _, config in config }
     dispatcher.setBindings(bindings)
     dispatcher.setActionHandler { [weak self] action in
       self?.windowManager?.handleAction(action)
