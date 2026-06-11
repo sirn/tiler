@@ -7,10 +7,10 @@ public enum Action: Equatable {
   case moveColumnRight
   case focusWindowUp
   case focusWindowDown
-  case focusScreenLeft
-  case focusScreenRight
-  case moveToScreenLeft
-  case moveToScreenRight
+  case focusScreenPrevious
+  case focusScreenNext
+  case moveToScreenPrevious
+  case moveToScreenNext
   case moveWindowUp
   case moveWindowDown
   case focusWorkspace(Int)
@@ -48,10 +48,10 @@ public enum Action: Equatable {
     case "toggle_fullscreen": return .toggleFullscreen
     case "consume_or_expel_left": return .consumeOrExpelLeft
     case "consume_or_expel_right": return .consumeOrExpelRight
-    case "focus_screen_left": return .focusScreenLeft
-    case "focus_screen_right": return .focusScreenRight
-    case "move_to_screen_left": return .moveToScreenLeft
-    case "move_to_screen_right": return .moveToScreenRight
+    case "focus_screen_previous": return .focusScreenPrevious
+    case "focus_screen_next": return .focusScreenNext
+    case "move_to_screen_previous": return .moveToScreenPrevious
+    case "move_to_screen_next": return .moveToScreenNext
     default: return nil
     }
   }
