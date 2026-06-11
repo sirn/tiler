@@ -1385,10 +1385,6 @@ public class WindowManager {
         for column in workspace.columns {
           for window in column.windows {
             let wid = window.id
-            // Idempotency: already parked if record's minX is left of the visible area
-            if let record = appliedWindows[window.groupKey], record.frame.minX < visibleFrame.minX {
-              continue
-            }
             guard let element = windowStore.element(for: wid) else { continue }
             guard let current = AXWindowBridge.currentFrame(for: element) else { continue }
             // Park position-only: right edge lands 1px into visible area, size unchanged
