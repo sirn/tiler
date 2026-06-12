@@ -45,7 +45,8 @@ public func reconcilePlan(
   unresolvedIDs: Set<CGWindowID> = [],
   noElementIDs: Set<CGWindowID> = [],
   resolveCounts: [CGWindowID: Int] = [:],
-  resolveThreshold: Int = 8
+  resolveThreshold: Int = 8,
+  reapingAllowed: Bool = true
 ) -> ReconcilePlan {
   var counts = missingCounts
   var toReap: Set<CGWindowID> = []
@@ -53,12 +54,14 @@ public func reconcilePlan(
     if stillAliveIDs.contains(id) {
       counts[id] = 0
     } else {
-      counts[id, default: 0] += 1
-      if counts[id]! >= missThreshold { toReap.insert(id) }
+      if reapingAllowed {
+        counts[id, default: 0] += 1
+        if counts[id]! >= missThreshold { toReap.insert(id) }
+      }
     }
   }
   counts = counts.filter { managedIDs.contains($0.key) }
-  let hasPendingMiss = counts.values.contains { $0 == 1 }
+  let hasPendingMiss = reapingAllowed && counts.values.contains { $0 == 1 }
   let toAdd = tileableIDs.subtracting(managedIDs)
 
   var resolve = resolveCounts

@@ -61,6 +61,8 @@ public class WindowManager {
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
+  private var reapSuppressedUntil: Date?
+  private var missPendingToken: UInt64 = 0
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
@@ -694,6 +696,28 @@ public class WindowManager {
       }
     }
 
+
+    // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
+    // When all managed windows vanish simultaneously, treat the pass as unreliable.
+    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty
+
+    let reapingAllowed: Bool
+    if let deadline = reapSuppressedUntil, Date() < deadline {
+      reapingAllowed = false
+    } else {
+      reapingAllowed = !massDisappearance
+    }
+
+    if massDisappearance {
+      tiler_log("reconcile: mass disappearance (\(managedIDs.count) managed, 0 alive) — suppressing reap, scheduling retry")
+      missPendingToken &+= 1
+      let token = missPendingToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        guard let self = self, self.missPendingToken == token else { return }
+        self.setNeedsReconcile()
+      }
+    }
+
     let plan = reconcilePlan(
       managedIDs: managedIDs,
       stillAliveIDs: stillAlive,
@@ -703,7 +727,8 @@ public class WindowManager {
       unresolvedIDs: notTileableCandidates.subtracting(managedIDs),
       noElementIDs: noElementCandidates.subtracting(managedIDs),
       resolveCounts: resolveCounts,
-      resolveThreshold: 8)
+      resolveThreshold: 8,
+      reapingAllowed: reapingAllowed)
     missingCounts = plan.updatedMissingCounts
     resolveCounts = plan.updatedResolveCounts
     tiler_debug(
@@ -831,7 +856,12 @@ public class WindowManager {
     hadNoElementLastPass = !noElementCandidates.isEmpty
 
     if plan.hasPendingMiss {
-      setNeedsReconcile()
+      missPendingToken &+= 1
+      let token = missPendingToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        guard let self = self, self.missPendingToken == token else { return }
+        self.setNeedsReconcile()
+      }
     }
 
     if plan.hasPendingResolve || plan.hasPendingNoElementResolve {
@@ -1194,6 +1224,8 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
         else { break }
         focusedScreenID = screenID
         focusFocusedWindow(in: workspace)
+      case .raiseTabbedWindows(let screenID, let wsID):
+        raiseTabbedWindows(screenID: screenID, wsID: wsID)
       case .closeWindow(let windowID):
         guard let element = windowStore.element(for: windowID) else { break }
         var closeButton: CFTypeRef?
@@ -1316,6 +1348,7 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       return
     }
 
+
     // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
     // First set kAXMainAttribute so the window becomes key, then raise it to bring it
     // to front. Some apps (Ghostty) need app.activate() called twice synchronously
@@ -1347,6 +1380,24 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
         if let sid = activeScreenID(), let wid = activeWorkspaceID() {
           scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
         }
+      }
+    }
+  }
+
+  private func raiseTabbedWindows(screenID: ScreenID, wsID: WorkspaceID) {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID],
+          !workspace.columns.isEmpty,
+          workspace.focusedColumnIndex < workspace.columns.count
+    else { return }
+    let col = workspace.columns[workspace.focusedColumnIndex]
+    guard col.mode == .tab, col.windows.count > 1 else { return }
+
+    var displayOrder = col.windows
+    let _ = displayOrder.remove(at: col.focusedWindowIndex)
+    displayOrder.append(col.windows[col.focusedWindowIndex])
+    for i in 0..<(displayOrder.count - 1) {
+      if let el = windowStore.element(for: displayOrder[i].id) {
+        AXUIElementPerformAction(el, kAXRaiseAction as CFString)
       }
     }
   }
@@ -1661,18 +1712,28 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
 
   private func screenDidLock() {
     tiler_log("Screen locked: pausing periodic reconcile")
+    reapSuppressedUntil = .distantFuture
     reconcileTimer?.invalidate()
     reconcileTimer = nil
   }
 
   private func screenDidUnlock() {
-    tiler_log("Screen unlocked: resuming periodic reconcile, forcing layout refresh")
+    tiler_log("Screen unlocked")
+    missingCounts.removeAll()
+    reapSuppressedUntil = Date(timeIntervalSinceNow: 3.0)
     if reconcileTimer == nil {
       reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
         self?.setNeedsReconcile()
       }
     }
     setNeedsReconcile()
+    // Schedule a deferred reconcile at T+3.0s so reaping resumes promptly after suppression
+    missPendingToken &+= 1
+    let token = missPendingToken
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+      guard let self = self, self.missPendingToken == token else { return }
+      self.setNeedsReconcile()
+    }
     // Defer retile to let display geometry and AX elements settle after unlock
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.setNeedsRetile()
