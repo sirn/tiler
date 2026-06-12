@@ -71,6 +71,8 @@ public class WindowManager {
   private var screenLockObserver: NSObjectProtocol?
   private var screenUnlockObserver: NSObjectProtocol?
   private var focusedScreenID: ScreenID?
+  private var pendingFocus: (wid: CGWindowID?, element: AXUIElement, pid: pid_t)?
+  private var pendingFocusAttempts: Int = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -853,6 +855,46 @@ public class WindowManager {
     }
     if membershipChanged { needsSave = true }
 
+    // Pending-focus replay: retry focus that arrived before its window was tiled.
+    // Runs after tab swaps and additions so the tile already has the correct CGWindowID.
+    // Retry until resolved (up to 8 attempts) — only clear on success. If the stored
+    // element is stale (e.g. clobbered by a wid=0 Finder burst), fall back to reading
+    // the current focused window from AX for the stored pid (read-only, no raise).
+    if let pending = pendingFocus {
+      var replayWid = pending.wid
+        ?? windowStore.windowID(for: pending.element)
+        ?? windowStore.windowIDByIdentity(for: pending.element)
+
+      if replayWid == nil {
+        let appElement = AXUIElementCreateApplication(pending.pid)
+        var focusedWindowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+          appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+        ) == .success, let ref = focusedWindowRef {
+          let winElement = ref as! AXUIElement
+          replayWid = windowStore.windowID(for: winElement)
+            ?? windowStore.windowIDByIdentity(for: winElement)
+          tiler_debug("pendingFocus: stored element stale, AX fallback wid=\(replayWid.map { "\($0)" } ?? "nil") pid=\(pending.pid)")
+        }
+      }
+
+      if let wid = replayWid, updateFocus(windowID: wid) {
+        tiler_debug("pendingFocus: replay succeeded wid=\(wid) attempts=\(pendingFocusAttempts)")
+        pendingFocus = nil
+        pendingFocusAttempts = 0
+      } else {
+        pendingFocusAttempts += 1
+        if pendingFocusAttempts >= 8 {
+          tiler_log("pendingFocus: giving up after \(pendingFocusAttempts) attempts wid=\(replayWid.map { "\($0)" } ?? "nil")")
+          pendingFocus = nil
+          pendingFocusAttempts = 0
+        } else {
+          tiler_debug("pendingFocus: not yet tiled, attempt \(pendingFocusAttempts)/8 wid=\(replayWid.map { "\($0)" } ?? "nil")")
+          setNeedsReconcile()
+        }
+      }
+    }
+
     // Prune appliedWindows for windows no longer in state
     let liveGroupKeys = Set(
       state.screens.values.flatMap { $0.workspaces.values }.flatMap { $0.columns }.flatMap {
@@ -861,16 +903,36 @@ public class WindowManager {
     appliedWindows = appliedWindows.filter { liveGroupKeys.contains($0.key) }
   }
 
-  private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-    guard let wid = windowStore.windowID(for: element) else {
-      if let axFrame = AXWindowBridge.currentFrame(for: element) {
-        let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
-        focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
-      }
-      return
+private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
+  let wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+
+  guard let wid = wid else {
+    if let axFrame = AXWindowBridge.currentFrame(for: element) {
+      let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+      focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
     }
-    updateFocus(windowID: wid)
+    pendingFocus = (wid: nil, element: element, pid: pid)
+    pendingFocusAttempts = 0
+    tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
+    setNeedsReconcile()
+    return
   }
+
+  if updateFocus(windowID: wid) {
+    pendingFocus = nil
+    return
+  }
+
+  // wid resolved but not yet in any tiled column (e.g. fresh tab CGWindowID pre-reconcile)
+  if let axFrame = AXWindowBridge.currentFrame(for: element) {
+    let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+    focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
+  }
+  pendingFocus = (wid: wid, element: element, pid: pid)
+  pendingFocusAttempts = 0
+  tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
+  setNeedsReconcile()
+}
 
   // MARK: - State mutations
 
@@ -1056,23 +1118,25 @@ public class WindowManager {
     }
   }
 
-  private func updateFocus(windowID: CGWindowID) {
-    for (screenID, var screenState) in state.screens {
-      for (wsID, var workspace) in screenState.workspaces {
-        for (colIdx, var column) in workspace.columns.enumerated() {
-          if let winIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
-            column.focusedWindowIndex = winIdx
-            workspace.columns[colIdx] = column
-            workspace.focusedColumnIndex = colIdx
-            screenState.workspaces[wsID] = workspace
-            state.screens[screenID] = screenState
-            focusedScreenID = screenID
-            return
-          }
+@discardableResult
+private func updateFocus(windowID: CGWindowID) -> Bool {
+  for (screenID, var screenState) in state.screens {
+    for (wsID, var workspace) in screenState.workspaces {
+      for (colIdx, var column) in workspace.columns.enumerated() {
+        if let winIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
+          column.focusedWindowIndex = winIdx
+          workspace.columns[colIdx] = column
+          workspace.focusedColumnIndex = colIdx
+          screenState.workspaces[wsID] = workspace
+          state.screens[screenID] = screenState
+          focusedScreenID = screenID
+          return true
         }
       }
     }
   }
+  return false
+}
 
   /// The stable groupKey of the tile currently backed by `wid`, or nil if `wid` isn't a tile.
   private func groupKey(forID wid: CGWindowID) -> WindowNode.GroupKey? {
