@@ -130,34 +130,43 @@ public enum LayoutEngine {
         }
 
       case .tab:
-        // In tab mode, only the focused window is on-screen at full column size
+        let titleBarHeight: CGFloat = 22
         let focusIdx = min(column.focusedWindowIndex, column.windows.count - 1)
-        for (index, window) in column.windows.enumerated() {
-          if index == focusIdx {
-            let frame = NSRect(
-              x: columnX,
-              y: usableRect.minY,
-              width: colWidth,
-              height: colHeight
-            )
-            result[window.id] = frame
-            tiler_debug(
-              "[LayoutEngine]     window \(window.id) (tab focused) → frame(\(String(format: "%.1f", frame.minX)), \(String(format: "%.1f", frame.minY)), \(String(format: "%.1f", frame.width)), \(String(format: "%.1f", frame.height)))"
-            )
-          } else {
-            // Off-screen with 1px on the correct screen edge so macOS honors the position
-            let frame = NSRect(
-              x: hiddenX,
-              y: usableRect.minY,
-              width: colWidth,
-              height: colHeight
-            )
-            result[window.id] = frame
-            tiler_debug(
-              "[LayoutEngine]     window \(window.id) (tab hidden) → off-screen frame (x=\(hiddenX), \(offLeft ? "left" : "right"))"
-            )
-          }
+        let count = column.windows.count
+        // All windows share the same frame height: remaining space after accounting
+        // for title bars of non-active windows that peek out above each other.
+        let windowHeight = max(1, colHeight - CGFloat(count - 1) * titleBarHeight)
+
+        // Build display order: non-active windows first, active window last.
+        var displayOrder = column.windows
+        let focused = displayOrder.remove(at: focusIdx)
+        displayOrder.append(focused)
+
+        // Non-active windows: stacked behind, each offset by titleBarHeight so only
+        // the title bar peeks above the window below it.
+        for i in 0..<displayOrder.count - 1 {
+          // Number of windows below this one in the visual stack.
+          let belowCount = (displayOrder.count - 1) - i
+          let y = usableRect.minY + CGFloat(belowCount) * titleBarHeight
+          let frame = NSRect(
+            x: columnX,
+            y: round(y),
+            width: colWidth,
+            height: round(windowHeight)
+          )
+          result[displayOrder[i].id] = frame
+          tiler_debug("[LayoutEngine]     window \(displayOrder[i].id) (tab non-active) → frame(x=\(frame.minX), y=\(frame.minY), w=\(frame.width), h=\(frame.height))")
         }
+
+        // Active window: at the bottom, fully visible.
+        let activeFrame = NSRect(
+          x: columnX,
+          y: usableRect.minY,
+          width: colWidth,
+          height: round(windowHeight)
+        )
+        result[focused.id] = activeFrame
+        tiler_debug("[LayoutEngine]     window \(focused.id) (tab active) → frame(x=\(activeFrame.minX), y=\(activeFrame.minY), w=\(activeFrame.width), h=\(activeFrame.height))")
       }
     }
 
