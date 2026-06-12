@@ -90,15 +90,27 @@ enum Reducer {
 
     case .focusWindowUp:
       return state.withFocusedColumn(env: env) { screenID, wsID, col in
-        guard col.focusedWindowIndex > 0 else { return [] }
-        col.focusedWindowIndex -= 1
+        let count = col.windows.count
+        if count <= 1 { return [] }
+        if col.mode == .tab {
+          col.focusedWindowIndex = (col.focusedWindowIndex - 1 + count) % count
+        } else {
+          guard col.focusedWindowIndex > 0 else { return [] }
+          col.focusedWindowIndex -= 1
+        }
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .focusWindowDown:
       return state.withFocusedColumn(env: env) { screenID, wsID, col in
-        guard col.focusedWindowIndex < col.windows.count - 1 else { return [] }
-        col.focusedWindowIndex += 1
+        let count = col.windows.count
+        if count <= 1 { return [] }
+        if col.mode == .tab {
+          col.focusedWindowIndex = (col.focusedWindowIndex + 1) % count
+        } else {
+          guard col.focusedWindowIndex < count - 1 else { return [] }
+          col.focusedWindowIndex += 1
+        }
         return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
