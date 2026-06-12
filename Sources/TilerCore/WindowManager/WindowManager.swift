@@ -70,8 +70,9 @@ public class WindowManager {
   private var screenChangeObserver: NSObjectProtocol?
   private var screenLockObserver: NSObjectProtocol?
   private var screenUnlockObserver: NSObjectProtocol?
-private var focusedScreenID: ScreenID?
-private var pendingFocus: (wid: CGWindowID?, element: AXUIElement)?
+  private var focusedScreenID: ScreenID?
+  private var pendingFocus: (wid: CGWindowID?, element: AXUIElement, pid: pid_t)?
+  private var pendingFocusAttempts: Int = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -856,14 +857,41 @@ private var pendingFocus: (wid: CGWindowID?, element: AXUIElement)?
 
     // Pending-focus replay: retry focus that arrived before its window was tiled.
     // Runs after tab swaps and additions so the tile already has the correct CGWindowID.
-    // One-shot: pendingFocus is cleared before the retry so a second miss is final.
+    // Retry until resolved (up to 8 attempts) — only clear on success. If the stored
+    // element is stale (e.g. clobbered by a wid=0 Finder burst), fall back to reading
+    // the current focused window from AX for the stored pid (read-only, no raise).
     if let pending = pendingFocus {
-      pendingFocus = nil
-      let replayWid = pending.wid
+      var replayWid = pending.wid
         ?? windowStore.windowID(for: pending.element)
         ?? windowStore.windowIDByIdentity(for: pending.element)
-      if let wid = replayWid {
-        updateFocus(windowID: wid)
+
+      if replayWid == nil {
+        let appElement = AXUIElementCreateApplication(pending.pid)
+        var focusedWindowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+          appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+        ) == .success, let ref = focusedWindowRef {
+          let winElement = ref as! AXUIElement
+          replayWid = windowStore.windowID(for: winElement)
+            ?? windowStore.windowIDByIdentity(for: winElement)
+          tiler_debug("pendingFocus: stored element stale, AX fallback wid=\(replayWid.map { "\($0)" } ?? "nil") pid=\(pending.pid)")
+        }
+      }
+
+      if let wid = replayWid, updateFocus(windowID: wid) {
+        tiler_debug("pendingFocus: replay succeeded wid=\(wid) attempts=\(pendingFocusAttempts)")
+        pendingFocus = nil
+        pendingFocusAttempts = 0
+      } else {
+        pendingFocusAttempts += 1
+        if pendingFocusAttempts >= 8 {
+          tiler_log("pendingFocus: giving up after \(pendingFocusAttempts) attempts wid=\(replayWid.map { "\($0)" } ?? "nil")")
+          pendingFocus = nil
+          pendingFocusAttempts = 0
+        } else {
+          tiler_debug("pendingFocus: not yet tiled, attempt \(pendingFocusAttempts)/8 wid=\(replayWid.map { "\($0)" } ?? "nil")")
+          setNeedsReconcile()
+        }
       }
     }
 
@@ -883,7 +911,8 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
       let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
       focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
     }
-    pendingFocus = (wid: nil, element: element)
+    pendingFocus = (wid: nil, element: element, pid: pid)
+    pendingFocusAttempts = 0
     tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
     setNeedsReconcile()
     return
@@ -899,7 +928,8 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
     focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
   }
-  pendingFocus = (wid: wid, element: element)
+  pendingFocus = (wid: wid, element: element, pid: pid)
+  pendingFocusAttempts = 0
   tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
   setNeedsReconcile()
 }
