@@ -61,6 +61,8 @@ public class WindowManager {
   private var moveSettleToken: UInt64 = 0
   private var missingCounts: [CGWindowID: Int] = [:]
   private var resolveCounts: [CGWindowID: Int] = [:]
+  private var reapSuppressedUntil: Date?
+  private var missPendingToken: UInt64 = 0
   private var resolveRetryToken: UInt64 = 0
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
@@ -694,6 +696,28 @@ public class WindowManager {
       }
     }
 
+
+    // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
+    // When all managed windows vanish simultaneously, treat the pass as unreliable.
+    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty
+
+    let reapingAllowed: Bool
+    if let deadline = reapSuppressedUntil, Date() < deadline {
+      reapingAllowed = false
+    } else {
+      reapingAllowed = !massDisappearance
+    }
+
+    if massDisappearance {
+      tiler_log("reconcile: mass disappearance (\(managedIDs.count) managed, 0 alive) — suppressing reap, scheduling retry")
+      missPendingToken &+= 1
+      let token = missPendingToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        guard let self = self, self.missPendingToken == token else { return }
+        self.setNeedsReconcile()
+      }
+    }
+
     let plan = reconcilePlan(
       managedIDs: managedIDs,
       stillAliveIDs: stillAlive,
@@ -703,7 +727,8 @@ public class WindowManager {
       unresolvedIDs: notTileableCandidates.subtracting(managedIDs),
       noElementIDs: noElementCandidates.subtracting(managedIDs),
       resolveCounts: resolveCounts,
-      resolveThreshold: 8)
+      resolveThreshold: 8,
+      reapingAllowed: reapingAllowed)
     missingCounts = plan.updatedMissingCounts
     resolveCounts = plan.updatedResolveCounts
     tiler_debug(
@@ -831,7 +856,12 @@ public class WindowManager {
     hadNoElementLastPass = !noElementCandidates.isEmpty
 
     if plan.hasPendingMiss {
-      setNeedsReconcile()
+      missPendingToken &+= 1
+      let token = missPendingToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        guard let self = self, self.missPendingToken == token else { return }
+        self.setNeedsReconcile()
+      }
     }
 
     if plan.hasPendingResolve || plan.hasPendingNoElementResolve {
@@ -1661,18 +1691,28 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
 
   private func screenDidLock() {
     tiler_log("Screen locked: pausing periodic reconcile")
+    reapSuppressedUntil = .distantFuture
     reconcileTimer?.invalidate()
     reconcileTimer = nil
   }
 
   private func screenDidUnlock() {
-    tiler_log("Screen unlocked: resuming periodic reconcile, forcing layout refresh")
+    tiler_log("Screen unlocked")
+    missingCounts.removeAll()
+    reapSuppressedUntil = Date(timeIntervalSinceNow: 3.0)
     if reconcileTimer == nil {
       reconcileTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
         self?.setNeedsReconcile()
       }
     }
     setNeedsReconcile()
+    // Schedule a deferred reconcile at T+3.0s so reaping resumes promptly after suppression
+    missPendingToken &+= 1
+    let token = missPendingToken
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+      guard let self = self, self.missPendingToken == token else { return }
+      self.setNeedsReconcile()
+    }
     // Defer retile to let display geometry and AX elements settle after unlock
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.setNeedsRetile()
