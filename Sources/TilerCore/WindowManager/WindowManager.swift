@@ -70,9 +70,9 @@ public class WindowManager {
   private var screenChangeObserver: NSObjectProtocol?
   private var screenLockObserver: NSObjectProtocol?
   private var screenUnlockObserver: NSObjectProtocol?
-private var focusedScreenID: ScreenID?
-private var pendingFocus: (wid: CGWindowID?, element: AXUIElement, pid: pid_t)?
-private var pendingFocusAttempts: Int = 0
+  private var focusedScreenID: ScreenID?
+  private var pendingFocus: (wid: CGWindowID?, element: AXUIElement, pid: pid_t)?
+  private var pendingFocusAttempts: Int = 0
 
   public init(eventBroker: EventBroker, config: Config = Config.defaults) {
     self.state = TilerState()
@@ -857,7 +857,7 @@ private var pendingFocusAttempts: Int = 0
 
     // Pending-focus replay: retry focus that arrived before its window was tiled.
     // Runs after tab swaps and additions so the tile already has the correct CGWindowID.
-    // Retry until resolved (up to 8 attempts) — only clear on success. If the stored 
+    // Retry until resolved (up to 8 attempts) — only clear on success. If the stored
     // element is stale (e.g. clobbered by a wid=0 Finder burst), fall back to reading
     // the current focused window from AX for the stored pid (read-only, no raise).
     if let pending = pendingFocus {
