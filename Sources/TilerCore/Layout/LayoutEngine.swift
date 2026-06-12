@@ -130,33 +130,31 @@ public enum LayoutEngine {
         }
 
       case .tab:
-        // In tab mode, only the focused window is on-screen at full column size
+        let totalGaps = gaps.innerGaps * CGFloat(column.windows.count - 1)
+        let windowHeight = max(1, (colHeight - totalGaps) / CGFloat(column.windows.count))
+        let effectiveHeight = max(windowHeight, column.measuredMinHeight ?? 0)
         let focusIdx = min(column.focusedWindowIndex, column.windows.count - 1)
-        for (index, window) in column.windows.enumerated() {
-          if index == focusIdx {
-            let frame = NSRect(
-              x: columnX,
-              y: usableRect.minY,
-              width: colWidth,
-              height: colHeight
-            )
-            result[window.id] = frame
-            tiler_debug(
-              "[LayoutEngine]     window \(window.id) (tab focused) → frame(\(String(format: "%.1f", frame.minX)), \(String(format: "%.1f", frame.minY)), \(String(format: "%.1f", frame.width)), \(String(format: "%.1f", frame.height)))"
-            )
-          } else {
-            // Off-screen with 1px on the correct screen edge so macOS honors the position
-            let frame = NSRect(
-              x: hiddenX,
-              y: usableRect.minY,
-              width: colWidth,
-              height: colHeight
-            )
-            result[window.id] = frame
-            tiler_debug(
-              "[LayoutEngine]     window \(window.id) (tab hidden) → off-screen frame (x=\(hiddenX), \(offLeft ? "left" : "right"))"
-            )
-          }
+
+        // Build display order: focused window at the bottom (last in display order).
+        var displayOrder = column.windows
+        let focused = displayOrder.remove(at: focusIdx)
+        displayOrder.append(focused)
+
+        // Cocoa y is bottom-origin; lay out top-down so displayOrder[0] is topmost.
+        var windowY = usableRect.maxY - effectiveHeight
+
+        for window in displayOrder {
+          let frame = NSRect(
+            x: columnX,
+            y: round(windowY),
+            width: colWidth,
+            height: round(effectiveHeight)
+          )
+          result[window.id] = frame
+          tiler_debug(
+            "[LayoutEngine]     window \(window.id) (tab) → frame(\(String(format: "%.1f", frame.minX)), \(String(format: "%.1f", frame.minY)), \(String(format: "%.1f", frame.width)), \(String(format: "%.1f", frame.height)))"
+          )
+          windowY -= effectiveHeight + gaps.innerGaps
         }
       }
     }
