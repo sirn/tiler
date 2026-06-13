@@ -133,6 +133,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     bindings[.parse("ctrl+alt+q")!] = .closeWindow
     bindings[.parse("ctrl+alt+bracketleft")!] = .consumeOrExpelLeft
     bindings[.parse("ctrl+alt+bracketright")!] = .consumeOrExpelRight
+    bindings[.parse("ctrl+alt+f")!] = .toggleFloat
 
     // Screen focus
     bindings[.parse("ctrl+alt+p")!] = .focusScreenPrevious
