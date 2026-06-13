@@ -66,6 +66,13 @@ public class WindowManager {
   private var reapSuppressedUntil: Date?
   private var missPendingToken: UInt64 = 0
   private var resolveRetryToken: UInt64 = 0
+  /// Windows whose bounds are still settling after first appearance (e.g. during open animation).
+  private var settlingWindows: [CGWindowID: (stableSince: Date, bounds: NSRect)] = [:]
+  private var settleRecheckToken: UInt64 = 0
+  private let settleDuration: TimeInterval = 0.25
+  /// Whether the next reconcile call is the first one after startup.
+  /// First reconcile adds windows immediately so restoreState has a windowPool.
+  private var isFirstReconcile = true
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
   private let statePersistence = StatePersistence()
@@ -556,13 +563,7 @@ public class WindowManager {
 
       if let element = windowStore.element(for: wid) {
         if WindowFilter.isTileable(element) {
-          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
-          if bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
-            tileableIDs.insert(wid)
-          } else {
-            notTileableCandidates.insert(wid)
-            tiler_debug("reconcile: skip small window wid=\(wid) title='\(title)' size=\(Int(bounds.width))x\(Int(bounds.height))")
-          }
+          tileableIDs.insert(wid)
         } else {
           skippedNotTileable += 1
           notTileableCandidates.insert(wid)
@@ -605,13 +606,8 @@ public class WindowManager {
               windowInfo[wid] = (pid, axTitle, tlBounds)
             }
           }
-          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
-          if let info = windowInfo[wid], info.bounds.width >= minWindowWidth && info.bounds.height >= minWindowHeight {
-            tileableIDs.insert(wid)
-            tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
-          } else {
-            tiler_debug("reconcile: skip small ax-orphan wid=\(wid) pid=\(pid)")
-          }
+          tileableIDs.insert(wid)
+          tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
         } else {
           skippedNotTileable += 1
           tiler_debug("reconcile: ax-orphan not-tileable wid=\(wid) pid=\(pid)")
@@ -709,13 +705,8 @@ public class WindowManager {
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
       if WindowFilter.isTileable(element) {
-        if let bounds = windowInfo[wid]?.bounds, bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
-          tileableIDs.insert(wid)
-          tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
-        } else {
-          notTileableCandidates.insert(wid)
-          tiler_debug("reconcile: skip small position-resolved wid=\(wid) pid=\(info.pid)")
-        }
+        tileableIDs.insert(wid)
+        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
       } else {
         notTileableCandidates.insert(wid)
         tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
@@ -906,13 +897,52 @@ public class WindowManager {
     // Add new windows
     for wid in adjustedToAdd {
       guard let (pid, title, bounds) = windowInfo[wid] else { continue }
+      if floatingWindows.contains(wid) {
+        continue                                    // manual toggle or app-rule float — persists
+      }
       if appRuleFloat(pid: pid) {
-        floatingWindows.insert(wid)
-        tiler_debug("reconcile: float-rule match for wid=\(wid) pid=\(pid) title='\(title)'")
+        floatingWindows.insert(wid)                 // first sight of an app-rule float
+        tiler_debug("reconcile: float (app-rule) wid=\(wid) pid=\(pid) title='\(title)'")
         continue
+      }
+      if bounds.width < minWindowWidth || bounds.height < minWindowHeight {
+        continue                                    // below-min: skip, re-evaluated next reconcile
+      }
+      // Require continuous bounds stability for settleDuration before tiling.
+      // First reconcile skips settling so windows are available in windowPool for
+      // restoreState immediately. Subsequent reconciles require bounds stability.
+      if !isFirstReconcile {
+        let now = Date()
+        if let prev = settlingWindows[wid], framesMatch(prev.bounds, bounds, tolerance: 1) {
+          if now.timeIntervalSince(prev.stableSince) >= settleDuration {
+            settlingWindows.removeValue(forKey: wid)
+            // stable long enough — fall through to addWindowToActiveWorkspace
+          } else {
+            continue    // stable but not long enough yet
+          }
+        } else {
+          settlingWindows[wid] = (stableSince: now, bounds: bounds)
+          tiler_debug("reconcile: settling wid=\(wid) pid=\(pid) bounds=\(bounds)")
+          continue    // first sighting or bounds changed — not stable yet
+        }
       }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
       membershipChanged = true
+    }
+
+    // Prune settle records for windows no longer in add candidates (closed during animation)
+    settlingWindows = settlingWindows.filter { adjustedToAdd.contains($0.key) }
+    if isFirstReconcile {
+      isFirstReconcile = false
+    }
+
+    if !settlingWindows.isEmpty {
+      settleRecheckToken &+= 1
+      let token = settleRecheckToken
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        guard let self = self, self.settleRecheckToken == token else { return }
+        self.setNeedsReconcile()
+      }
     }
 
     if membershipChanged {
