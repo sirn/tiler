@@ -610,18 +610,19 @@ public class WindowManager {
     // (isTileable == false) and destroyed (element == nil) windows remain dropped.
     let onScreenIDs = Set(windowInfo.keys)
     var stillAlive: Set<CGWindowID> = []
-    for screenState in state.screens.values {
+    for (screenID, screenState) in state.screens {
       let visibleFrame = screenState.info.visibleFrame
-      for workspace in screenState.workspaces.values {
+      for (wsID, workspace) in screenState.workspaces {
         for column in workspace.columns {
           for window in column.windows {
             guard let element = windowStore.element(for: window.id),
               WindowFilter.isTileable(element)
             else {
+              tiler_debug("reconcile: skip wid=\(window.id) pid=\(window.pid) reason=\(windowStore.element(for: window.id) == nil ? "no-element" : "not-tileable") onScreen=\(onScreenIDs.contains(window.id))")
               // Window has no element mapping. Check if it's a transient SPI
               // failure (window still in AX tree but axGetWindowID failed) vs
               // actual destruction (window gone from AX entirely).
-              if onScreenIDs.contains(window.id) {
+              if onScreenIDs.contains(window.id) || column.mode == .tab {
                 // Read AX window list for this PID to check if window still exists
                 let appElement = AXUIElementCreateApplication(window.pid)
                 var windowsRef: CFTypeRef?
@@ -630,6 +631,22 @@ public class WindowManager {
                   let isInAX = axWindows.contains { axGetWindowID($0) == window.id }
                   if isInAX {
                     stillAlive.insert(window.id)
+                  }
+                  if !isInAX, column.mode == .tab, let frame = appliedWindows[window.groupKey]?.frame {
+                    // Position fallback: check if any AX window sits at the same position (tolerance ~20pt)
+                    let hasMatchingFrame = axWindows.contains { axWin in
+                      var posRef: CFTypeRef?
+                      if AXUIElementCopyAttributeValue(axWin, kAXPositionAttribute as CFString, &posRef) == .success,
+                         let posVal = posRef, AXValueGetType(posVal as! AXValue) == .cgPoint {
+                        var point = CGPoint.zero
+                        AXValueGetValue(posVal as! AXValue, .cgPoint, &point)
+                        return abs(point.x - frame.minX) < 20 && abs(point.y - frame.minY) < 20
+                      }
+                      return false
+                    }
+                    if hasMatchingFrame {
+                      stillAlive.insert(window.id)
+                    }
                   }
                 } else {
                   // Can't read AX tree — transient issue, keep alive
@@ -652,11 +669,11 @@ public class WindowManager {
             }
             let overlap =
               min(frame.maxX, visibleFrame.maxX) - max(frame.minX, visibleFrame.minX)
-            if overlap <= 50 {
+            if overlap <= 50 || column.mode == .tab {
               stillAlive.insert(window.id)
             } else {
               tiler_debug(
-                "reconcile: background-tab drop wid=\(window.id) pid=\(window.pid) overlap=\(Int(overlap)) (absent from on-screen list)")
+                "reconcile: background-tab drop wid=\(window.id) pid=\(window.pid) overlap=\(Int(overlap)) mode=\(column.mode) colWindows=\(column.windows.count) ws=\(wsID) scr=\(screenID) (absent from on-screen list)")
             }
           }
         }
@@ -824,6 +841,9 @@ public class WindowManager {
           let reaped = workspace.columns[colIdx].windows.filter { plan.toReap.contains($0.id) }
           for w in reaped {
             tiler_debug("reconcile: reaping wid=\(w.id) pid=\(w.pid) title='\(w.title)' from ws=\(wsID)")
+          }
+          if !reaped.isEmpty {
+            tiler_debug("reconcile: reaping \(reaped.count) windows from col=\(colIdx) ws=\(wsID): \(reaped.map { "\($0.id)" }.joined(separator: ","))")
           }
           workspace.columns[colIdx].windows.removeAll { plan.toReap.contains($0.id) }
           if workspace.columns[colIdx].windows.count < before {
@@ -1276,6 +1296,11 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       case .scheduleDeferredTabRefresh(let screenID, let wsID):
         scheduleDeferredTabRefresh(screenID: screenID, wsID: wsID)
 
+      case .clearAppliedFrame(let windowID):
+        if let gk = groupKey(forID: windowID) {
+          appliedWindows.removeValue(forKey: gk)
+        }
+
       case .log(let message):
         tiler_log(message)
       }
@@ -1296,7 +1321,7 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       if let resolved = resolveActiveTabSwap(pid: node.pid, tileFrame: frame, currentID: node.id) {
         swapWindowID(from: node.id, to: resolved.newWID, title: resolved.newTitle)
         changed = true
-        tiler_debug("tab refresh: tile \(node.id) -> \(resolved.newWID) (live active tab)")
+        tiler_debug("refreshActiveTabs: swapping tile \(node.id) -> \(resolved.newWID) title='\(resolved.newTitle)' at frame=\(frame)")
       }
     }
     return changed

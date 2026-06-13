@@ -34,6 +34,7 @@ extension Workspace {
         windows: [win], focusedWindowIndex: 0, mode: col.mode, widthFraction: col.widthFraction)
       let insertAt = direction == .left ? focusedColumnIndex : focusedColumnIndex + 1
       cols.insert(newCol, at: insertAt)
+      tiler_debug("consumeOrExpel: \(direction == .left ? "left" : "right") expelled wid=\(win.id) pid=\(win.pid) to new col=\(insertAt) mode=\(cols[insertAt].mode) totalWindows=\(cols[insertAt].windows.count)")
       columns = cols
       self.focusedColumnIndex = insertAt
       return true
@@ -45,6 +46,7 @@ extension Workspace {
       cols[adjustedTarget].windows.append(win)
       cols[adjustedTarget].focusedWindowIndex = cols[adjustedTarget].windows.count - 1
       cols[adjustedTarget].measuredMinWidth = nil
+      tiler_debug("consumeOrExpel: \(direction == .left ? "left" : "right") consumed wid=\(win.id) pid=\(win.pid) to col=\(adjustedTarget) mode=\(cols[adjustedTarget].mode) totalWindows=\(cols[adjustedTarget].windows.count)")
       columns = cols
       self.focusedColumnIndex = adjustedTarget
       return true

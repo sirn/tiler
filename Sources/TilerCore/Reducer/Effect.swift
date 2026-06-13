@@ -9,5 +9,6 @@ enum Effect: Equatable {
   case toggleFullscreen(CGWindowID)
   case refreshTabs(ScreenID, WorkspaceID)
   case scheduleDeferredTabRefresh(ScreenID, WorkspaceID)
+  case clearAppliedFrame(CGWindowID)
   case log(String)
 }

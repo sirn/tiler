@@ -185,7 +185,7 @@ final class ReducerTests: XCTestCase {
 
     let effects = Reducer.apply(.consumeOrExpelLeft, to: &state, env: env())
     XCTAssertEqual(state.screens[1]?.workspaces[1]?.columns.count, 2)
-    XCTAssertEqual(effects, [.refreshTabs(1, 1), .scheduleDeferredTabRefresh(1, 1), .retile])
+    XCTAssertEqual(effects, [.clearAppliedFrame(100), .refreshTabs(1, 1), .scheduleDeferredTabRefresh(1, 1), .retile])
   }
 
   // MARK: - No-op on invalid state

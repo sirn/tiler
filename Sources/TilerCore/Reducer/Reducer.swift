@@ -389,8 +389,23 @@ enum Reducer {
     env: ReducerEnv
   ) -> [Effect] {
     state.withActiveWorkspace(env: env) { screenID, wsID, ws in
+      // Snapshot focused window ID before mutation
+      let focusedWinID: CGWindowID? = {
+        guard ws.focusedColumnIndex < ws.columns.count else { return nil }
+        let col = ws.columns[ws.focusedColumnIndex]
+        guard col.focusedWindowIndex < col.windows.count else { return nil }
+        return col.windows[col.focusedWindowIndex].id
+      }()
       guard ws.consumeOrExpel(direction: direction) else { return [] }
-      return [.refreshTabs(screenID, wsID), .scheduleDeferredTabRefresh(screenID, wsID), .retile]
+      var effects: [Effect] = [
+        .refreshTabs(screenID, wsID),
+        .scheduleDeferredTabRefresh(screenID, wsID),
+        .retile,
+      ]
+      if let winID = focusedWinID {
+        effects.insert(.clearAppliedFrame(winID), at: 0)
+      }
+      return effects
     }
   }
 }
