@@ -17,9 +17,9 @@ public enum WindowFilter {
       == .success,
       let subroleStr = subrole as? String
     {
-      // Reject only known-non-tileable subroles
+      // Reject known-non-tileable subroles
       switch subroleStr {
-      case "AXSheet", "AXDrawer", "AXSystemDialog":
+      case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
         return false
       default:
         break
