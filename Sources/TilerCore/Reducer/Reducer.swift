@@ -390,7 +390,7 @@ enum Reducer {
   ) -> [Effect] {
     state.withActiveWorkspace(env: env) { screenID, wsID, ws in
       guard ws.consumeOrExpel(direction: direction) else { return [] }
-      return [.refreshTabs(screenID, wsID), .scheduleDeferredTabRefresh(screenID, wsID), .retile]
+      return [.refreshTabs(screenID, wsID), .scheduleDeferredTabRefresh(screenID, wsID), .raiseTabbedWindows(screenID, wsID), .focusFocusedWindow(screenID, wsID), .retile]
     }
   }
 }
