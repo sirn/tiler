@@ -98,7 +98,7 @@ enum Reducer {
           guard col.focusedWindowIndex > 0 else { return [] }
           col.focusedWindowIndex -= 1
         }
-        return [.raiseTabbedWindows(screenID, wsID), .focusFocusedWindow(screenID, wsID), .retile]
+        return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .focusWindowDown:
@@ -111,7 +111,7 @@ enum Reducer {
           guard col.focusedWindowIndex < count - 1 else { return [] }
           col.focusedWindowIndex += 1
         }
-        return [.raiseTabbedWindows(screenID, wsID), .focusFocusedWindow(screenID, wsID), .retile]
+        return [.focusFocusedWindow(screenID, wsID), .retile]
       }
 
     case .moveWindowUp:
