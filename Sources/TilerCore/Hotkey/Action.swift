@@ -23,6 +23,7 @@ public enum Action: Equatable {
   case consumeOrExpelLeft
   case consumeOrExpelRight
   case dumpFrameState
+  case toggleFloat
 
   /// Parse an action string with optional arguments.
   /// e.g. "focus_workspace" with args ["3"] → .focusWorkspace(3)
@@ -54,6 +55,7 @@ public enum Action: Equatable {
     case "move_to_screen_previous": return .moveToScreenPrevious
     case "move_to_screen_next": return .moveToScreenNext
     case "dump_frame_state": return .dumpFrameState
+    case "toggle_float": return .toggleFloat
     default: return nil
     }
   }

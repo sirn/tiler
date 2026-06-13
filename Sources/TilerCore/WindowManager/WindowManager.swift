@@ -25,6 +25,8 @@ public class WindowManager {
   public var minWindowHeight: CGFloat
 
   public let windowStore = WindowStore()
+  private var floatingWindows: Set<CGWindowID> = []
+  private var appRules: [AppRuleConfig] = []
 
   /// Fired whenever the menu bar indicator state (occupied workspaces or current) changes.
   public var onWorkspaceIndicatorChanged: ((WorkspaceIndicator) -> Void)?
@@ -87,6 +89,7 @@ public class WindowManager {
     self.layoutConfig = config.layout
     self.minWindowWidth = config.general.minWindowWidth
     self.minWindowHeight = config.general.minWindowHeight
+    self.appRules = config.appRules
 
     self.eventBroker = eventBroker
 
@@ -438,8 +441,21 @@ public class WindowManager {
       }
     }
 
+    self.appRules = config.appRules
     setNeedsRetile()
     tiler_log("Applied new config (gaps=\(config.general), workspaces=\(workspaceCount))")
+  }
+
+  /// Returns all app rules whose `app` pattern matches the process's bundle identifier.
+  private func matchingAppRules(pid: pid_t) -> [AppRuleConfig] {
+    guard let app = NSRunningApplication(processIdentifier: pid),
+          let bundleID = app.bundleIdentifier else { return [] }
+    return appRules.filter { globMatch(pattern: $0.app, target: bundleID) }
+  }
+
+  /// Check whether the given window matches an app rule with action = "float".
+  private func appRuleFloat(pid: pid_t) -> Bool {
+    matchingAppRules(pid: pid).contains { $0.action == "float" }
   }
 
   // MARK: - Event handling
@@ -449,6 +465,13 @@ public class WindowManager {
     case .appLaunched:
       setNeedsReconcile()
     case .appTerminated(let pid):
+      // Prune floating windows before windowStore forgets the pid
+      floatingWindows = floatingWindows.filter { wid in
+        guard let element = windowStore.element(for: wid) else { return false }
+        var elementPid: pid_t = 0
+        AXUIElementGetPid(element, &elementPid)
+        return elementPid != pid
+      }
       windowStore.forget(pid: pid)
       removeWindowsForPID(pid)
       setNeedsRetile()
@@ -464,6 +487,8 @@ public class WindowManager {
       handleFocusChanged(pid: pid, element: element)
     case .geometryChanged(_, let element):
       guard let wid = windowStore.windowID(for: element) else { return }
+      if floatingWindows.contains(wid) { return }
+
       let decision: EchoDecision
       if let observed = AXWindowBridge.currentFrame(for: element) {
         decision = classifyGeometryChange(
@@ -609,6 +634,7 @@ public class WindowManager {
     // visible area by at most the ~1px edge sliver, so they are kept. Minimized / fullscreen
     // (isTileable == false) and destroyed (element == nil) windows remain dropped.
     let onScreenIDs = Set(windowInfo.keys)
+
     var stillAlive: Set<CGWindowID> = []
     for screenState in state.screens.values {
       let visibleFrame = screenState.info.visibleFrame
@@ -880,6 +906,11 @@ public class WindowManager {
     // Add new windows
     for wid in adjustedToAdd {
       guard let (pid, title, bounds) = windowInfo[wid] else { continue }
+      if appRuleFloat(pid: pid) {
+        floatingWindows.insert(wid)
+        tiler_debug("reconcile: float-rule match for wid=\(wid) pid=\(pid) title='\(title)'")
+        continue
+      }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
       membershipChanged = true
     }
@@ -949,6 +980,11 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     pendingFocusAttempts = 0
     tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
     setNeedsReconcile()
+    return
+  }
+
+  // Floating windows are not managed by the tiler
+  if floatingWindows.contains(wid) {
     return
   }
 
@@ -1228,9 +1264,61 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       dumpFrameDiagnostics()
       return
     }
+    if case .toggleFloat = action {
+      toggleFloatActiveWindow()
+      return
+    }
     let effects = Reducer.apply(action, to: &state, env: computeEnv())
     runEffects(effects)
     needsSave = true
+  }
+
+  // MARK: - Floating windows
+
+  /// Toggle the floating state of the currently-focused window.
+  /// First resolves the live AX-focused window (so un-float works even when
+  /// the window is not in tiled state), then falls back to the tiled focus path.
+  private func toggleFloatActiveWindow() {
+    // Try to resolve the live AX-focused window
+    var axWID: CGWindowID?
+    if let frontApp = NSWorkspace.shared.frontmostApplication {
+      let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+      var focusedWindowRef: CFTypeRef?
+      if AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+      ) == .success, let ref = focusedWindowRef {
+        let winElement = ref as! AXUIElement
+        axWID = windowStore.windowID(for: winElement) ?? axGetWindowID(winElement)
+      }
+    }
+
+    if let wid = axWID, floatingWindows.contains(wid) {
+      // Un-float: remove from floating set and let reconcile re-tile it
+      floatingWindows.remove(wid)
+      setNeedsReconcile()
+      needsSave = true
+      tiler_log("Un-floated window wid=\(wid)")
+      return
+    }
+
+    // Fall back to the tiled focus path for floating a tiled window
+    guard let window = currentlyFocusedWindow() else {
+      tiler_log("toggleFloat: no focused window")
+      return
+    }
+
+    if floatingWindows.contains(window.id) {
+      floatingWindows.remove(window.id)
+      setNeedsReconcile()
+      needsSave = true
+      tiler_log("Un-floated window wid=\(window.id)")
+    } else {
+      floatingWindows.insert(window.id)
+      removeWindow(windowID: window.id)
+      setNeedsRetile()
+      needsSave = true
+      tiler_log("Floated window wid=\(window.id)")
+    }
   }
 
 
@@ -1321,6 +1409,20 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
   }
 
   // MARK: - Focus helpers
+
+  /// The currently-focused window node in the active workspace, or nil if no workspace/column/window is focused.
+  private func currentlyFocusedWindow() -> WindowNode? {
+    guard let screenID = activeScreenID(),
+          let screenState = state.screens[screenID],
+          let workspace = screenState.workspaces[screenState.activeWorkspaceID],
+          !workspace.columns.isEmpty,
+          workspace.focusedColumnIndex < workspace.columns.count
+    else { return nil }
+
+    let col = workspace.columns[workspace.focusedColumnIndex]
+    guard col.focusedWindowIndex < col.windows.count else { return nil }
+    return col.windows[col.focusedWindowIndex]
+  }
 
   private func focusFocusedWindow(in workspace: Workspace) {
     guard !workspace.columns.isEmpty,

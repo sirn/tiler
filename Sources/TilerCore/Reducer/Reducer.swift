@@ -376,6 +376,8 @@ enum Reducer {
       return applyConsumeOrExpel(.left, to: &state, env: env)
     case .consumeOrExpelRight:
       return applyConsumeOrExpel(.right, to: &state, env: env)
+    case .toggleFloat:
+      return []
     case .dumpFrameState:
       return []
     }
