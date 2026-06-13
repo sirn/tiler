@@ -458,15 +458,6 @@ public class WindowManager {
     matchingAppRules(pid: pid).contains { $0.action == "float" }
   }
 
-  /// True when a newly-discovered window must not be tiled: already floating,
-  /// matched by a float app-rule, or below the minimum meaningful tiling size.
-  private func shouldSkipTiling(wid: CGWindowID, pid: pid_t, bounds: NSRect) -> Bool {
-    if floatingWindows.contains(wid) { return true }
-    if appRuleFloat(pid: pid) { return true }
-    if bounds.width < minWindowWidth || bounds.height < minWindowHeight { return true }
-    return false
-  }
-
   // MARK: - Event handling
 
   private func handleEvent(_ event: TilerEvent) {
@@ -899,10 +890,16 @@ public class WindowManager {
     // Add new windows
     for wid in adjustedToAdd {
       guard let (pid, title, bounds) = windowInfo[wid] else { continue }
-      if shouldSkipTiling(wid: wid, pid: pid, bounds: bounds) {
-        floatingWindows.insert(wid)
-        tiler_debug("reconcile: float (skip-tiling) wid=\(wid) pid=\(pid) title='\(title)'")
+      if floatingWindows.contains(wid) {
+        continue                                    // manual toggle or app-rule float — persists
+      }
+      if appRuleFloat(pid: pid) {
+        floatingWindows.insert(wid)                 // first sight of an app-rule float
+        tiler_debug("reconcile: float (app-rule) wid=\(wid) pid=\(pid) title='\(title)'")
         continue
+      }
+      if bounds.width < minWindowWidth || bounds.height < minWindowHeight {
+        continue                                    // below-min: skip, re-evaluated next reconcile
       }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
       membershipChanged = true
