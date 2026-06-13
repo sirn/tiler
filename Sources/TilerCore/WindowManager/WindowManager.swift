@@ -458,6 +458,15 @@ public class WindowManager {
     matchingAppRules(pid: pid).contains { $0.action == "float" }
   }
 
+  /// True when a newly-discovered window must not be tiled: already floating,
+  /// matched by a float app-rule, or below the minimum meaningful tiling size.
+  private func shouldSkipTiling(wid: CGWindowID, pid: pid_t, bounds: NSRect) -> Bool {
+    if floatingWindows.contains(wid) { return true }
+    if appRuleFloat(pid: pid) { return true }
+    if bounds.width < minWindowWidth || bounds.height < minWindowHeight { return true }
+    return false
+  }
+
   // MARK: - Event handling
 
   private func handleEvent(_ event: TilerEvent) {
@@ -556,13 +565,7 @@ public class WindowManager {
 
       if let element = windowStore.element(for: wid) {
         if WindowFilter.isTileable(element) {
-          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
-          if bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
-            tileableIDs.insert(wid)
-          } else {
-            notTileableCandidates.insert(wid)
-            tiler_debug("reconcile: skip small window wid=\(wid) title='\(title)' size=\(Int(bounds.width))x\(Int(bounds.height))")
-          }
+          tileableIDs.insert(wid)
         } else {
           skippedNotTileable += 1
           notTileableCandidates.insert(wid)
@@ -605,13 +608,8 @@ public class WindowManager {
               windowInfo[wid] = (pid, axTitle, tlBounds)
             }
           }
-          // Skip windows too small to be meaningful tiling targets (transient dialogs, popups)
-          if let info = windowInfo[wid], info.bounds.width >= minWindowWidth && info.bounds.height >= minWindowHeight {
-            tileableIDs.insert(wid)
-            tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
-          } else {
-            tiler_debug("reconcile: skip small ax-orphan wid=\(wid) pid=\(pid)")
-          }
+          tileableIDs.insert(wid)
+          tiler_debug("reconcile: ax-orphan tileable wid=\(wid) pid=\(pid)")
         } else {
           skippedNotTileable += 1
           tiler_debug("reconcile: ax-orphan not-tileable wid=\(wid) pid=\(pid)")
@@ -709,13 +707,8 @@ public class WindowManager {
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
       if WindowFilter.isTileable(element) {
-        if let bounds = windowInfo[wid]?.bounds, bounds.width >= minWindowWidth && bounds.height >= minWindowHeight {
-          tileableIDs.insert(wid)
-          tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
-        } else {
-          notTileableCandidates.insert(wid)
-          tiler_debug("reconcile: skip small position-resolved wid=\(wid) pid=\(info.pid)")
-        }
+        tileableIDs.insert(wid)
+        tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
       } else {
         notTileableCandidates.insert(wid)
         tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
@@ -906,9 +899,9 @@ public class WindowManager {
     // Add new windows
     for wid in adjustedToAdd {
       guard let (pid, title, bounds) = windowInfo[wid] else { continue }
-      if appRuleFloat(pid: pid) {
+      if shouldSkipTiling(wid: wid, pid: pid, bounds: bounds) {
         floatingWindows.insert(wid)
-        tiler_debug("reconcile: float-rule match for wid=\(wid) pid=\(pid) title='\(title)'")
+        tiler_debug("reconcile: float (skip-tiling) wid=\(wid) pid=\(pid) title='\(title)'")
         continue
       }
       addWindowToActiveWorkspace(windowID: wid, pid: pid, title: title, bounds: bounds)
