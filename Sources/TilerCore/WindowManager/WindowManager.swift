@@ -1347,7 +1347,6 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       return
     }
 
-
     // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
     // First set kAXMainAttribute so the window becomes key, then raise it to bring it
     // to front. Some apps (Ghostty) need app.activate() called twice synchronously
