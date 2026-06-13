@@ -1346,6 +1346,20 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       return
     }
 
+    // In tab mode, raise all non-active windows in displayOrder so the visual
+    // stack's Z-order matches the layout: non-active from back to front, active
+    // window last (frontmost).
+    if col.mode == .tab {
+      var displayOrder = col.windows
+      let _ = displayOrder.remove(at: col.focusedWindowIndex)
+      displayOrder.append(col.windows[col.focusedWindowIndex])
+      for i in 0..<(displayOrder.count - 1) {
+        if let el = windowStore.element(for: displayOrder[i].id) { 
+          AXUIElementPerformAction(el, kAXRaiseAction as CFString)
+        }
+      }
+    }
+
     // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
     // First set kAXMainAttribute so the window becomes key, then raise it to bring it
     // to front. Some apps (Ghostty) need app.activate() called twice synchronously
