@@ -102,6 +102,7 @@ All actions available for binding:
 | `close_window` | Close the focused window |
 | `toggle_fullscreen` | Toggle fullscreen on the focused window |
 | `consume_or_expel_left` / `consume_or_expel_right` | Merge column with neighbor or split |
+| `toggle_float` | Toggle floating mode on the focused window |
 
 Modifier prefixes: `ctrl`, `alt`/`option`, `cmd`/`command`, `shift`
 
@@ -109,16 +110,20 @@ Key names: `a`–`z`, `0`–`9`, `f1`–`f12`, `space`, `return`, `tab`, `escape
 
 ### App Rules
 
-Per-application overrides matched against bundle name or process name (case-insensitive substring match):
+Per-application overrides matched against bundle identifier using simple wildcard patterns (`*` matches any sequence of characters, case-insensitive):
 
 ```toml
 [[app_rule]]
-app = "Finder"
-action = "float"       # Exclude app from tiling
+app = "com.apple.finder"
+action = "float"          # Exclude app from tiling
 
 [[app_rule]]
-app = "Slack"
-column_width = 0.4     # Preferred column width for this app
+app = "com.tinyspeck.slackmacgap"
+column_width = 0.4        # Preferred column width for this app
+
+[[app_rule]]
+app = "com.apple.*"
+action = "float"          # Float all Apple apps
 ```
 
 ### Default Keybindings
@@ -135,6 +140,7 @@ column_width = 0.4     # Preferred column width for this app
 | `ctrl+alt+t` | Toggle column tabbed mode |
 | `ctrl+alt+q` | Close window |
 | `ctrl+alt+[` / `ctrl+alt+]` | Consume/expel left/right |
+| `ctrl+alt+f` | Toggle floating mode |
 
 ## Debugging
 
