@@ -1224,6 +1224,8 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
         else { break }
         focusedScreenID = screenID
         focusFocusedWindow(in: workspace)
+      case .raiseTabbedWindows(let screenID, let wsID):
+        raiseTabbedWindows(screenID: screenID, wsID: wsID)
       case .closeWindow(let windowID):
         guard let element = windowStore.element(for: windowID) else { break }
         var closeButton: CFTypeRef?
@@ -1346,6 +1348,7 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       return
     }
 
+
     // Move keyboard focus to the tile: mark it main, raise it, and activate the app.
     // First set kAXMainAttribute so the window becomes key, then raise it to bring it
     // to front. Some apps (Ghostty) need app.activate() called twice synchronously
@@ -1377,6 +1380,24 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
         if let sid = activeScreenID(), let wid = activeWorkspaceID() {
           scheduleDeferredTabRefresh(screenID: sid, wsID: wid)
         }
+      }
+    }
+  }
+
+  private func raiseTabbedWindows(screenID: ScreenID, wsID: WorkspaceID) {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID],
+          !workspace.columns.isEmpty,
+          workspace.focusedColumnIndex < workspace.columns.count
+    else { return }
+    let col = workspace.columns[workspace.focusedColumnIndex]
+    guard col.mode == .tab, col.windows.count > 1 else { return }
+
+    var displayOrder = col.windows
+    let _ = displayOrder.remove(at: col.focusedWindowIndex)
+    displayOrder.append(col.windows[col.focusedWindowIndex])
+    for i in 0..<(displayOrder.count - 1) {
+      if let el = windowStore.element(for: displayOrder[i].id) {
+        AXUIElementPerformAction(el, kAXRaiseAction as CFString)
       }
     }
   }
