@@ -545,9 +545,11 @@ public class WindowManager {
     var skippedNoElement = 0
     var skippedNotTileable = 0
     var totalCandidates = 0
+    var allCGWindowIDs: Set<CGWindowID> = []
 
     for info in windowList {
       guard let wid = info[kCGWindowNumber as String] as? CGWindowID else { continue }
+      allCGWindowIDs.insert(wid)
       guard let layer = info[kCGWindowLayer as String] as? Int, layer <= 0 else { continue }
       guard let pid = info[kCGWindowOwnerPID as String] as? pid_t else { continue }
       guard let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular
@@ -580,11 +582,10 @@ public class WindowManager {
     // CGWindowListCopyWindowInfo (common in Chromium-based apps like Vivaldi).
     // These windows have a valid axGetWindowID and tileable AX element but never
     // appear in CGWindowList, so the main CG loop above misses them entirely.
-    let cgWindowIDs = Set(windowInfo.keys)
     let cgPIDs = Set(windowInfo.values.map { $0.pid })
     for pid in managedPIDs.union(cgPIDs) {
       let storedWids = windowStore.wids(for: pid)
-      let orphanWids = storedWids.subtracting(cgWindowIDs)
+      let orphanWids = storedWids.subtracting(allCGWindowIDs)
       for wid in orphanWids {
         guard !tileableIDs.contains(wid), let element = windowStore.element(for: wid)
         else { continue }
