@@ -17,10 +17,18 @@ public enum WindowFilter {
       == .success,
       let subroleStr = subrole as? String
     {
-      // Reject only known-non-tileable subroles
+      // Reject known-non-tileable subroles
       switch subroleStr {
-      case "AXSheet", "AXDrawer", "AXSystemDialog":
+      case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
         return false
+      case "AXDialog":
+        var closeButton: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+          element, kAXCloseButtonAttribute as CFString, &closeButton
+        ) == .success, closeButton != nil
+        else {
+          return false
+        }
       default:
         break
       }
