@@ -1223,8 +1223,9 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
               let workspace = screenState.workspaces[wsID]
         else { break }
         focusedScreenID = screenID
-        raiseWindows(in: workspace)
         focusFocusedWindow(in: workspace)
+      case .raiseTabbedWindows(let screenID, let wsID):
+        raiseTabbedWindows(screenID: screenID, wsID: wsID)
       case .closeWindow(let windowID):
         guard let element = windowStore.element(for: windowID) else { break }
         var closeButton: CFTypeRef?
@@ -1356,8 +1357,8 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
     if let app = NSRunningApplication(processIdentifier: window.pid) {
       app.activate(options: [.activateIgnoringOtherApps])
       app.activate(options: [.activateIgnoringOtherApps])
-
     }
+    AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     tiler_debug("focus: ax raise wid=\(raisedWid) pid=\(window.pid)")
 
     // If we raised the stored tile without adopting an active tab, and that tile is absent
@@ -1381,28 +1382,19 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
     }
   }
 
-  private func raiseWindows(in workspace: Workspace) {
-    guard !workspace.columns.isEmpty,
+  private func raiseTabbedWindows(screenID: ScreenID, wsID: WorkspaceID) {
+    guard let workspace = state.screens[screenID]?.workspaces[wsID],
+          !workspace.columns.isEmpty,
           workspace.focusedColumnIndex < workspace.columns.count
     else { return }
     let col = workspace.columns[workspace.focusedColumnIndex]
-    guard !col.windows.isEmpty,
-          col.focusedWindowIndex < col.windows.count
-    else { return }
+    guard col.mode == .tab, col.windows.count > 1 else { return }
 
-    if col.mode == .tab, col.windows.count > 1 {
-      // Reorder Z: non-focused tabs back-to-front, then focused on top.
-      var displayOrder = col.windows
-      let _ = displayOrder.remove(at: col.focusedWindowIndex)
-      displayOrder.append(col.windows[col.focusedWindowIndex])
-      for window in displayOrder {
-        if let el = windowStore.element(for: window.id) {
-          AXUIElementPerformAction(el, kAXRaiseAction as CFString)
-        }
-      }
-    } else {
-      let focusedWindow = col.windows[col.focusedWindowIndex]
-      if let el = windowStore.element(for: focusedWindow.id) {
+    var displayOrder = col.windows
+    let _ = displayOrder.remove(at: col.focusedWindowIndex)
+    displayOrder.append(col.windows[col.focusedWindowIndex])
+    for i in 0..<(displayOrder.count - 1) {
+      if let el = windowStore.element(for: displayOrder[i].id) {
         AXUIElementPerformAction(el, kAXRaiseAction as CFString)
       }
     }
