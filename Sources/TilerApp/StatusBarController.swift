@@ -1,18 +1,41 @@
 import AppKit
 
 /// A menu bar item showing occupied workspaces as a row of bordered numbers, with the
-/// current workspace inverted. Display-only for now (no menu / click handling).
+/// current workspace inverted. Clicking opens a menu with an "Exit Tiler" item.
 final class StatusBarController {
   private let statusItem: NSStatusItem
 
   init() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem.button?.imagePosition = .imageOnly
+    let menu = NSMenu()
+    let exitItem = NSMenuItem(
+      title: "Exit Tiler",
+      action: #selector(NSApplication.terminate(_:)),
+      keyEquivalent: "q"
+    )
+    exitItem.target = NSApplication.shared
+    menu.addItem(exitItem)
+    statusItem.menu = menu
   }
 
   /// Update the indicator to show `occupied` workspaces, drawing `current` inverted.
   func update(occupied: [Int], current: Int) {
     statusItem.button?.image = StatusBarController.indicatorImage(occupied: occupied, current: current)
+  }
+  /// Toggle degraded-mode display. When true, show "⚠ Grant Accessibility" as
+  /// the button title (no image) so the user sees permission is pending and can
+  /// still open the Exit Tiler menu. When false, clear the title and restore
+  /// image-only mode; the next `update()` call sets the workspace indicator.
+  func setDegradedMode(_ degraded: Bool) {
+    if degraded {
+      statusItem.button?.image = nil
+      statusItem.button?.imagePosition = .noImage
+      statusItem.button?.title = "⚠ Grant Accessibility"
+    } else {
+      statusItem.button?.title = ""
+      statusItem.button?.imagePosition = .imageOnly
+    }
   }
 
   private static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
