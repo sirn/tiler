@@ -26,6 +26,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         + "Privacy & Security > Accessibility; Tiler will start automatically once granted."
       )
       startPermissionPoll()
+      // Show a degraded-mode menu bar item ("⚠ Grant Accessibility" + Exit Tiler
+      // menu) so the user can quit without a terminal while waiting for permission.
+      let statusBar = StatusBarController()
+      self.statusBar = statusBar
+      statusBar.setDegradedMode(true)
     }
   }
 
@@ -53,9 +58,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Initialize screens and workspaces
     wm.initializeScreens()
 
-    // Menu bar workspace indicator
-    let statusBar = StatusBarController()
-    self.statusBar = statusBar
+    // Menu bar workspace indicator: transition the degraded-mode item if it
+    // exists (set during the accessibility-poll phase), else create a new one.
+    let statusBar: StatusBarController
+    if let existing = self.statusBar {
+      existing.setDegradedMode(false)
+      statusBar = existing
+    } else {
+      statusBar = StatusBarController()
+      self.statusBar = statusBar
+    }
     if let indicator = wm.workspaceIndicator() {
       statusBar.update(occupied: indicator.occupied, current: indicator.current)
     }
