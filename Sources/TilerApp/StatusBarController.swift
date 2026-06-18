@@ -1,13 +1,22 @@
 import AppKit
 
 /// A menu bar item showing occupied workspaces as a row of bordered numbers, with the
-/// current workspace inverted. Display-only for now (no menu / click handling).
+/// current workspace inverted. Clicking opens a menu with an "Exit Tiler" item.
 final class StatusBarController {
   private let statusItem: NSStatusItem
 
   init() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem.button?.imagePosition = .imageOnly
+    let menu = NSMenu()
+    let exitItem = NSMenuItem(
+      title: "Exit Tiler",
+      action: #selector(NSApplication.terminate(_:)),
+      keyEquivalent: "q"
+    )
+    exitItem.target = NSApplication.shared
+    menu.addItem(exitItem)
+    statusItem.menu = menu
   }
 
   /// Update the indicator to show `occupied` workspaces, drawing `current` inverted.
