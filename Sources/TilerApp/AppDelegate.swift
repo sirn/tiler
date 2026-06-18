@@ -8,20 +8,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var hotkeyDispatcher: HotkeyDispatcher?
   private var configLoader: ConfigLoader?
   private var statusBar: StatusBarController?
+  private var permissionPollTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     // Ensure accessibility permissions are granted
-    guard AXIsProcessTrusted() else {
+    if AXIsProcessTrusted() {
+      startCore()
+    } else {
+      // Show the system "grant accessibility" dialog. macOS presents this at most
+      // once per process launch on the first call; later calls are silent reads.
       let options: NSDictionary = [
         kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true
       ]
       _ = AXIsProcessTrustedWithOptions(options)
       tiler_log(
-        "Accessibility permission required. Please grant it in System Settings > Privacy & Security > Accessibility, then relaunch."
+        "Accessibility permission required. Grant it in System Settings > "
+        + "Privacy & Security > Accessibility; Tiler will start automatically once granted."
       )
-      NSApplication.shared.terminate(nil)
-      return
+      startPermissionPoll()
     }
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    windowManager?.saveState()
+  }
+
+  private func startCore() {
+    guard windowManager == nil else { return }
     tiler_log("Accessibility permissions granted. Starting...")
 
     // Load config
@@ -73,8 +86,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     self.hotkeyDispatcher = dispatcher
   }
 
-  func applicationWillTerminate(_ notification: Notification) {
-    windowManager?.saveState()
+  /// Polls Accessibility trust state and runs `startCore()` on the first grant.
+  /// Uses plain `AXIsProcessTrusted()` (no prompt) — the prompt was already shown
+  /// at launch, mirroring coord's split between `check_and_prompt` (once) and
+  /// `is_trusted` (polled). 2 s cadence matches the existing reconcile timer.
+  private func startPermissionPoll() {
+    permissionPollTimer = Timer.scheduledTimer(
+      withTimeInterval: 2.0, repeats: true
+    ) { [weak self] timer in
+      guard let self = self else { timer.invalidate(); return }
+      guard AXIsProcessTrusted() else { return }
+      timer.invalidate()
+      self.permissionPollTimer = nil
+      tiler_log("Accessibility permission granted; launching core.")
+      self.startCore()
+    }
   }
 
   // MARK: - Keybind helpers
