@@ -1909,6 +1909,57 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
     setNeedsRetile()
   }
 
+  /// Move all managed windows to visible positions on the main screen so the
+  /// user isn't left with windows stranded off-screen after Tiler quits.
+  /// Cascades windows diagonally within the main screen's visible frame.
+  public func gatherWindowsToMainScreen() {
+    guard let mainScreen = NSScreen.screens.first else { return }
+    let visibleFrame = mainScreen.visibleFrame
+
+    // Collect all managed windows (preserving order: screen, workspace, column).
+    var windows: [(wid: CGWindowID, element: AXUIElement)] = []
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for node in column.windows {
+            if let element = windowStore.element(for: node.id) {
+              windows.append((node.id, element))
+            }
+          }
+        }
+      }
+    }
+
+    guard !windows.isEmpty else { return }
+
+    // Cascade offset: 32px diagonal, wrapping when it exceeds the visible frame.
+    let cascadeStep: CGFloat = 32
+    let maxCascadeOffset = min(visibleFrame.width, visibleFrame.height) / 3
+    var frames: [CGWindowID: NSRect] = [:]
+
+    for (index, (wid, element)) in windows.enumerated() {
+      // Read the window's current size; only reposition, don't resize.
+      guard let current = AXWindowBridge.currentFrame(for: element) else { continue }
+
+      // If already fully visible on the main screen, leave it alone.
+      if visibleFrame.contains(current) { continue }
+
+      let cascadeOffset = CGFloat(index) * cascadeStep
+      let wrappedOffset = cascadeOffset.truncatingRemainder(dividingBy: maxCascadeOffset)
+
+      let frame = NSRect(
+        x: visibleFrame.minX + wrappedOffset,
+        y: visibleFrame.maxY - current.height - wrappedOffset,
+        width: current.width,
+        height: current.height)
+      frames[wid] = frame
+    }
+
+    guard !frames.isEmpty else { return }
+    AXWindowBridge.applyFrames(frames, store: windowStore)
+    tiler_log("Gathered \(frames.count) windows to the main screen on quit")
+  }
+
   public func saveState() {
     statePersistence.save(state)
   }

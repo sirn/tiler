@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    windowManager?.gatherWindowsToMainScreen()
     windowManager?.saveState()
   }
 
