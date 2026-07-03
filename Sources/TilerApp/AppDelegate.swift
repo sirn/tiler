@@ -11,6 +11,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var permissionPollTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // Install crash handlers early so we can recover even during startup.
+    TilerInstallCrashHandlers()
+
     // Ensure accessibility permissions are granted
     if AXIsProcessTrusted() {
       startCore()
@@ -35,6 +38,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    windowManager?.gatherWindowsToMainScreen()
+    windowManager?.deleteCrashRecoveryFile()
     windowManager?.saveState()
   }
 
@@ -54,6 +59,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Set up window manager with config
     let wm = WindowManager(eventBroker: broker, config: config)
     self.windowManager = wm
+
+    // If the previous instance crashed, gather stranded windows before starting.
+    wm.performCrashRecoveryIfNeeded()
 
     // Initialize screens and workspaces
     wm.initializeScreens()
