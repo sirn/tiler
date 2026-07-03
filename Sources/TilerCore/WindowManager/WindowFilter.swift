@@ -21,7 +21,13 @@ public enum WindowFilter {
       switch subroleStr {
       case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
         return false
-      case "AXDialog":
+      case "AXStandardWindow":
+        break  // standard window — always tileable
+      default:
+        // Non-standard subrole (AXDialog, AXUnknown, etc.) — require a close button
+        // to confirm it's a genuine window with standard chrome. This rejects
+        // Chromium extension popups which have AXUnknown subrole and no window
+        // buttons.
         var closeButton: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
           element, kAXCloseButtonAttribute as CFString, &closeButton
@@ -29,8 +35,6 @@ public enum WindowFilter {
         else {
           return false
         }
-      default:
-        break
       }
     }
 
