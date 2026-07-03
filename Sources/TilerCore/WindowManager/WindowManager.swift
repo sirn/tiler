@@ -190,6 +190,7 @@ public class WindowManager {
       needsRetile = false
       retileAllScreens()
       hideInactiveWorkspaces()
+      writeCrashRecoveryFile()
     }
     if needsReconcile {
       needsReconcile = false
@@ -1911,7 +1912,8 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
 
   /// Move all managed windows to visible positions on the main screen so the
   /// user isn't left with windows stranded off-screen after Tiler quits.
-  /// Cascades windows diagonally within the main screen's visible frame.
+  /// Partially visible windows are snapped to the nearest edge; non-visible
+  /// windows are centered on the main screen.
   public func gatherWindowsToMainScreen() {
     guard let mainScreen = NSScreen.screens.first else { return }
     let visibleFrame = mainScreen.visibleFrame
@@ -1932,32 +1934,92 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
 
     guard !windows.isEmpty else { return }
 
-    // Cascade offset: 32px diagonal, wrapping when it exceeds the visible frame.
-    let cascadeStep: CGFloat = 32
-    let maxCascadeOffset = min(visibleFrame.width, visibleFrame.height) / 3
     var frames: [CGWindowID: NSRect] = [:]
 
-    for (index, (wid, element)) in windows.enumerated() {
+    for (wid, element) in windows {
       // Read the window's current size; only reposition, don't resize.
       guard let current = AXWindowBridge.currentFrame(for: element) else { continue }
 
       // If already fully visible on the main screen, leave it alone.
       if visibleFrame.contains(current) { continue }
 
-      let cascadeOffset = CGFloat(index) * cascadeStep
-      let wrappedOffset = cascadeOffset.truncatingRemainder(dividingBy: maxCascadeOffset)
+      var target = current
 
-      let frame = NSRect(
-        x: visibleFrame.minX + wrappedOffset,
-        y: visibleFrame.maxY - current.height - wrappedOffset,
-        width: current.width,
-        height: current.height)
-      frames[wid] = frame
+      // Check if the window intersects the visible frame at all.
+      let intersects = current.intersects(visibleFrame)
+
+      if intersects {
+        // Partially visible: snap to the nearest edge.
+        if target.minX < visibleFrame.minX {
+          target.origin.x = visibleFrame.minX
+        } else if target.maxX > visibleFrame.maxX {
+          target.origin.x = visibleFrame.maxX - target.width
+        }
+        if target.minY < visibleFrame.minY {
+          target.origin.y = visibleFrame.minY
+        } else if target.maxY > visibleFrame.maxY {
+          target.origin.y = visibleFrame.maxY - target.height
+        }
+      } else {
+        // Not visible at all: center on the main screen.
+        target.origin.x = visibleFrame.midX - target.width / 2.0
+        target.origin.y = visibleFrame.midY - target.height / 2.0
+      }
+
+      if target != current {
+        frames[wid] = target
+      }
     }
 
     guard !frames.isEmpty else { return }
     AXWindowBridge.applyFrames(frames, store: windowStore)
     tiler_log("Gathered \(frames.count) windows to the main screen on quit")
+  }
+
+  /// Write the PID list of all managed windows to the crash recovery file.
+  /// Called periodically so the file is always current; the crash handler
+  /// child process reads this file to know which windows to gather.
+  public func writeCrashRecoveryFile() {
+    let path = TilerCrashRecoveryFilePath() as String
+    guard !path.isEmpty else { return }
+
+    var pids = Set<pid_t>()
+    for screenState in state.screens.values {
+      for workspace in screenState.workspaces.values {
+        for column in workspace.columns {
+          for node in column.windows {
+            pids.insert(node.pid)
+          }
+        }
+      }
+    }
+
+    let pidArray = pids.sorted().map { NSNumber(value: $0) }
+    guard let data = try? JSONSerialization.data(
+      withJSONObject: pidArray, options: [])
+    else { return }
+    try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+  }
+
+  /// Delete the crash recovery file. Called on clean shutdown so the next
+  /// launch doesn't mistake a clean quit for a crash.
+  public func deleteCrashRecoveryFile() {
+    let path = TilerCrashRecoveryFilePath() as String
+    guard !path.isEmpty else { return }
+    try? FileManager.default.removeItem(atPath: path)
+  }
+
+  /// On launch, check if the crash recovery file exists (indicating the
+  /// previous instance crashed). If so, gather stranded windows before
+  /// starting normal operation, then remove the file.
+  public func performCrashRecoveryIfNeeded() {
+    let path = TilerCrashRecoveryFilePath() as String
+    guard !path.isEmpty else { return }
+    guard FileManager.default.fileExists(atPath: path) else { return }
+
+    tiler_log("Crash recovery file found — gathering windows from previous crash")
+    TilerCrashRecoveryGather()
+    try? FileManager.default.removeItem(atPath: path)
   }
 
   public func saveState() {
