@@ -22,7 +22,16 @@ public enum WindowFilter {
       case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
         return false
       case "AXStandardWindow":
-        break  // standard window — always tileable
+        // Standard windows should have a close button. macOS file dialogs (Open/Save
+        // panels promoted to standalone windows in newer OS versions) report
+        // AXStandardWindow but lack a close button — reject them.
+        var closeButton: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+          element, kAXCloseButtonAttribute as CFString, &closeButton
+        ) == .success, closeButton != nil
+        else {
+          return false
+        }
       default:
         // Non-standard subrole (AXDialog, AXUnknown, etc.) — require a close button
         // to confirm it's a genuine window with standard chrome. This rejects
