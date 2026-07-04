@@ -1001,7 +1001,25 @@ public class WindowManager {
   }
 
 private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-  let wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+  var wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+
+  // The notification element can be stale or fail to resolve (transient _AXUIElementGetWindow
+  // failure). Re-derive the focused window from kAXFocusedWindowAttribute before queuing a
+  // replay — this is the same fallback used in the pendingFocus replay path below.
+  if wid == nil {
+    let appElement = AXUIElementCreateApplication(pid)
+    var focusedWindowRef: CFTypeRef?
+    if AXUIElementCopyAttributeValue(
+      appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+    ) == .success, let ref = focusedWindowRef {
+      let winElement = ref as! AXUIElement
+      wid = windowStore.windowID(for: winElement)
+        ?? windowStore.windowIDByIdentity(for: winElement)
+      if wid != nil {
+        tiler_debug("handleFocusChanged: notification element stale, AX fallback wid=\(wid!) pid=\(pid)")
+      }
+    }
+  }
 
   guard let wid = wid else {
     if let axFrame = AXWindowBridge.currentFrame(for: element) {
@@ -1300,9 +1318,37 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       toggleFloatActiveWindow()
       return
     }
+    // Refresh focusedScreenID from the live AX focused window before computing the reducer
+    // env. Without this, focusedScreenID can drift from actual OS focus when the user clicks
+    // a window on another screen and no kAXFocusedWindowChangedNotification reaches us (or
+    // the notification element failed to resolve), causing navigation to target the wrong
+    // screen/workspace.
+    syncFocusedScreenFromAX()
     let effects = Reducer.apply(action, to: &state, env: computeEnv())
     runEffects(effects)
     needsSave = true
+  }
+
+  /// Update `focusedScreenID` from the live AX focused window. Called before navigation
+  /// actions so stale focus state doesn't route h/l/j/k to the wrong screen. Only ever
+  /// sets `focusedScreenID` (never clears it) — consistent with `updateFocus` and the
+  /// focus event handlers.
+  private func syncFocusedScreenFromAX() {
+    guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+    let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+    var focusedWindowRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+      ) == .success,
+      let ref = focusedWindowRef
+    else { return }
+    let winElement = ref as! AXUIElement
+    guard let axFrame = AXWindowBridge.currentFrame(for: winElement) else { return }
+    let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+    if let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) }) {
+      focusedScreenID = screen.displayID
+    }
   }
 
   // MARK: - Floating windows
