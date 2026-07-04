@@ -101,17 +101,15 @@ Ensure your changes do not break or degrade performance in these critical areas:
 - **State restore across restarts**: Terminate Tiler, restart it, and verify windows return to their correct persisted workspaces.
 
 ## Version control
-- Always use Jujutsu (`jj`) for commit operations, not git directly.
-- Commit messages: Use imperative mood (e.g. "Add...", "Fix..."), first line <= 72 characters, followed by a blank line and body text wrapped at 72 characters.
-- Commit scope: Each commit should represent exactly one logical change. Do not squash, rebase, or abandon commits unless explicitly instructed by the user.
-- The empty working-copy commit (`@`) created by `jj commit` is expected; do not attempt to delete or alter it.
+- Commit messages: imperative mood (e.g. "Add...", "Fix..."), first line <= 72 characters, followed by a blank line and body text wrapped at 72 characters.
+- Each commit should represent one logical change. Do not squash, rebase, or abandon commits unless explicitly instructed by the user.
 
 ## Common pitfalls
 - **Direct AX/CG calls in Reducer**: Never call Accessibility or CoreGraphics APIs within Reducer code.
 - **WindowFilter dialog checks**: Checking for `AXStandardWindow` is insufficient. Many save/open dialogs report as standard windows but lack a close button; filter them by asserting the presence of `kAXCloseButtonAttribute`.
 - **absorbMinWidth fullscreen guard**: When a window enters fullscreen, its width matches the screen. Prevent `absorbMinWidth` from locking column widths by skipping absorption when the observed width meets or exceeds the usable screen width (`observedWidth >= usableWidth`).
 - **wasNotTileableLastPass stickiness**: Fullscreen windows may disappear from `CGWindowList` for a few passes during screen transitions. The non-tileable set must remain sticky until the window returns or is fully reaped.
-- **Manual lockfile changes**: Do not edit lockfiles. If dependencies change, regenerate them using the Swift Package Manager (`swift package update`).
+- **Manual lockfile changes**: Do not edit lockfiles. Regenerate via `swift package update`.
 - **State file location**: `~/Library/Application Support/tiler/state.json` (not in `.build/`).
 - **Config file location**: `~/.config/tiler/config.toml`. Refer to `Resources/config.toml.example` for reference options.
 
