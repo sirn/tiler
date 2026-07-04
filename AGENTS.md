@@ -28,7 +28,7 @@ Tiler implements a pure Elm-like architecture (State -> Actions -> Reducer -> Ef
 Follow this workflow when deploying and testing a live build.
 
 ### Launching Tiler
-First build the app, then launch via `tu` with debug logging enabled:
+First build the app, then launch it in the background via a terminal multiplexer or background runner (e.g. `terminal-use`) with debug logging enabled:
 ```sh
 swift build
 tu run --name tiler --env TILER_DEBUG=1 .build/debug/TilerApp
@@ -70,7 +70,7 @@ Write a small Swift script utilizing `CGWindowListCopyWindowInfo` and `AXUIEleme
 
 ### Testing workflow
 1. Ensure a clean build and that all tests pass (`swift build && swift test`).
-2. Start Tiler in debug mode: `tu run --name tiler --env TILER_DEBUG=1 .build/debug/TilerApp`.
+2. Start Tiler in debug mode via a background runner (e.g. `tu run --name tiler --env TILER_DEBUG=1 .build/debug/TilerApp`).
 3. In a separate pane, start `log stream` to observe behaviors in real time.
 4. Launch safe test apps (TextEdit, Ghostty, Finder).
 5. Exercise your changes: send hotkeys, open/close/minimize windows.
@@ -81,7 +81,7 @@ Write a small Swift script utilizing `CGWindowListCopyWindowInfo` and `AXUIEleme
 ### Cleanup after testing
 Run the following cleanup sequence when finished testing:
 ```sh
-tu kill --name tiler
+tu kill --name tiler  # or stop via your background runner
 pkill -f 'log stream.*co.cakework'
 rm -f ~/Library/Application\ Support/tiler/state.json  # Reset state persistence if needed
 osascript -e 'tell application "TextEdit" to quit saving no'
