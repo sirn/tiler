@@ -75,6 +75,11 @@ public class WindowManager {
   private var isFirstReconcile = true
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
+  /// Window IDs that were not-tileable in the previous reconcile (e.g. fullscreen,
+  /// minimized). Used to detect transitions back to tileable so we can reset
+  /// stale measuredMinWidth/measuredMinHeight that may have been absorbed during
+  /// the non-tileable phase.
+  private var wasNotTileableLastPass: Set<CGWindowID> = []
   private let statePersistence = StatePersistence()
   private var needsSave = false
   private var reconcileTimer: Timer?
@@ -877,6 +882,39 @@ public class WindowManager {
       }
     }
     hadNoElementLastPass = !noElementCandidates.isEmpty
+
+    // Detect windows that transitioned from not-tileable (fullscreen, minimized) back
+    // to tileable. Reset stale measuredMinWidth/measuredMinHeight for their columns —
+    // these may have been absorbed during the non-tileable phase (e.g. a fullscreen
+    // window's width was absorbed as a min-width, locking the column at screen width).
+    // The not-tileable set is kept sticky for managed windows: a fullscreen window may
+    // vanish from CGWindowList for several reconcile passes during the Space transition,
+    // and we need to remember it was not-tileable until it returns as tileable or is reaped.
+    let becameTileable = tileableIDs.intersection(wasNotTileableLastPass)
+    if !becameTileable.isEmpty {
+      for (screenID, var screenState) in state.screens {
+        for (wsID, var workspace) in screenState.workspaces {
+          for colIdx in workspace.columns.indices {
+            if workspace.columns[colIdx].windows.contains(where: { becameTileable.contains($0.id) }) {
+              workspace.columns[colIdx].measuredMinWidth = nil
+              workspace.columns[colIdx].measuredMinHeight = nil
+              tiler_debug("reconcile: reset measuredMinWidth/Height for col \(colIdx) ws=\(wsID) (window exited fullscreen/minimized)")
+            }
+          }
+          screenState.workspaces[wsID] = workspace
+        }
+        state.screens[screenID] = screenState
+      }
+      setNeedsRetile()
+    }
+    // Sticky not-tileable tracking: keep managed IDs that are still not-tileable or
+    // absent this pass (fullscreen Space transitions cause CGWindowList absence).
+    // Drop IDs that became tileable or were reaped (no longer in state).
+    let managedIDsAfterReap = Set(
+      state.screens.values.flatMap { $0.workspaces.values }.flatMap { $0.columns }.flatMap { $0.windows }.map { $0.id })
+    wasNotTileableLastPass = (wasNotTileableLastPass.union(notTileableCandidates))
+      .intersection(managedIDsAfterReap)
+      .subtracting(tileableIDs)
 
     if plan.hasPendingMiss {
       missPendingToken &+= 1
@@ -1868,6 +1906,16 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       guard var workspace = screenState.workspaces[wsID] else { continue }
       for colIdx in workspace.columns.indices {
         if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          // Skip absorption when the observed width is at or beyond the usable screen
+          // width. A genuine minimum width can never reach the usable width — that
+          // would mean the window fills the entire tiling area, which only happens
+          // during a fullscreen transition. Without this guard, a fullscreen window's
+          // width gets absorbed as measuredMinWidth, permanently locking the column.
+          let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
+          guard observedWidth < usableWidth else {
+            tiler_debug("absorbMinWidth: skipping \(observedWidth) >= usable \(usableWidth) for wid=\(wid) (likely fullscreen transition)")
+            return
+          }
           workspace.columns[colIdx].measuredMinWidth = max(
             workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
           screenState.workspaces[wsID] = workspace
@@ -1886,6 +1934,13 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       guard var workspace = screenState.workspaces[wsID] else { continue }
       for colIdx in workspace.columns.indices {
         if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          // Skip absorption when the observed height is at or beyond the usable
+          // screen height — same rationale as absorbMinWidth above.
+          let usableHeight = screenState.info.visibleFrame.height - 2 * gaps.outerGaps
+          guard observedHeight < usableHeight else {
+            tiler_debug("absorbMinHeight: skipping \(observedHeight) >= usable \(usableHeight) for wid=\(wid) (likely fullscreen transition)")
+            return
+          }
           workspace.columns[colIdx].measuredMinHeight = max(
             workspace.columns[colIdx].measuredMinHeight ?? 0, observedHeight)
           screenState.workspaces[wsID] = workspace
