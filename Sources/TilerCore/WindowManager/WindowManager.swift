@@ -75,6 +75,11 @@ public class WindowManager {
   private var isFirstReconcile = true
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
+  /// Window IDs that were not-tileable in the previous reconcile (e.g. fullscreen,
+  /// minimized). Used to detect transitions back to tileable so we can reset
+  /// stale measuredMinWidth/measuredMinHeight that may have been absorbed during
+  /// the non-tileable phase.
+  private var wasNotTileableLastPass: Set<CGWindowID> = []
   private let statePersistence = StatePersistence()
   private var needsSave = false
   private var reconcileTimer: Timer?
@@ -878,6 +883,29 @@ public class WindowManager {
     }
     hadNoElementLastPass = !noElementCandidates.isEmpty
 
+    // Detect windows that transitioned from not-tileable (fullscreen, minimized) back
+    // to tileable. Reset stale measuredMinWidth/measuredMinHeight for their columns —
+    // these may have been absorbed during the non-tileable phase (e.g. a fullscreen
+    // window's width was absorbed as a min-width, locking the column at screen width).
+    let becameTileable = tileableIDs.intersection(wasNotTileableLastPass)
+    if !becameTileable.isEmpty {
+      for (screenID, var screenState) in state.screens {
+        for (wsID, var workspace) in screenState.workspaces {
+          for colIdx in workspace.columns.indices {
+            if workspace.columns[colIdx].windows.contains(where: { becameTileable.contains($0.id) }) {
+              workspace.columns[colIdx].measuredMinWidth = nil
+              workspace.columns[colIdx].measuredMinHeight = nil
+              tiler_debug("reconcile: reset measuredMinWidth/Height for col \(colIdx) ws=\(wsID) (window exited fullscreen/minimized)")
+            }
+          }
+          screenState.workspaces[wsID] = workspace
+        }
+        state.screens[screenID] = screenState
+      }
+      setNeedsRetile()
+    }
+    wasNotTileableLastPass = notTileableCandidates
+
     if plan.hasPendingMiss {
       missPendingToken &+= 1
       let token = missPendingToken
@@ -1001,14 +1029,40 @@ public class WindowManager {
   }
 
 private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-  let wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+  var wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+  // Use the resolved element for downstream frame reads / pending storage. When the
+  // notification element is stale we replace it with the live focused window below.
+  var focusElement = element
+
+  // The notification element can be stale or fail to resolve (transient _AXUIElementGetWindow
+  // failure). Re-derive the focused window from kAXFocusedWindowAttribute before queuing a
+  // replay — this is the same fallback used in the pendingFocus replay path below. Carry the
+  // resolved element forward so the screen update and pending replay use the live focused
+  // window, not the stale notification element.
+  if wid == nil {
+    let appElement = AXUIElementCreateApplication(pid)
+    var focusedWindowRef: CFTypeRef?
+    if AXUIElementCopyAttributeValue(
+      appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+    ) == .success, let ref = focusedWindowRef {
+      let winElement = ref as! AXUIElement
+      wid = windowStore.windowID(for: winElement)
+        ?? windowStore.windowIDByIdentity(for: winElement)
+      if wid != nil {
+        focusElement = winElement
+        tiler_debug("handleFocusChanged: notification element stale, AX fallback wid=\(wid!) pid=\(pid)")
+      }
+    }
+  }
 
   guard let wid = wid else {
-    if let axFrame = AXWindowBridge.currentFrame(for: element) {
+    if let axFrame = AXWindowBridge.currentFrame(for: focusElement) {
       let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
-      focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
+      if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
+        focusedScreenID = id
+      }
     }
-    pendingFocus = (wid: nil, element: element, pid: pid)
+    pendingFocus = (wid: nil, element: focusElement, pid: pid)
     pendingFocusAttempts = 0
     tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
     setNeedsReconcile()
@@ -1026,11 +1080,13 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
   }
 
   // wid resolved but not yet in any tiled column (e.g. fresh tab CGWindowID pre-reconcile)
-  if let axFrame = AXWindowBridge.currentFrame(for: element) {
+  if let axFrame = AXWindowBridge.currentFrame(for: focusElement) {
     let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
-    focusedScreenID = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID
+    if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
+      focusedScreenID = id
+    }
   }
-  pendingFocus = (wid: wid, element: element, pid: pid)
+  pendingFocus = (wid: wid, element: focusElement, pid: pid)
   pendingFocusAttempts = 0
   tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
   setNeedsReconcile()
@@ -1300,9 +1356,37 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       toggleFloatActiveWindow()
       return
     }
+    // Refresh focusedScreenID from the live AX focused window before computing the reducer
+    // env. Without this, focusedScreenID can drift from actual OS focus when the user clicks
+    // a window on another screen and no kAXFocusedWindowChangedNotification reaches us (or
+    // the notification element failed to resolve), causing navigation to target the wrong
+    // screen/workspace.
+    syncFocusedScreenFromAX()
     let effects = Reducer.apply(action, to: &state, env: computeEnv())
     runEffects(effects)
     needsSave = true
+  }
+
+  /// Update `focusedScreenID` from the live AX focused window. Called before navigation
+  /// actions so stale focus state doesn't route h/l/j/k to the wrong screen. Only ever
+  /// sets `focusedScreenID` (never clears it) — consistent with `updateFocus` and the
+  /// focus event handlers.
+  private func syncFocusedScreenFromAX() {
+    guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+    let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+    var focusedWindowRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+      ) == .success,
+      let ref = focusedWindowRef
+    else { return }
+    let winElement = ref as! AXUIElement
+    guard let axFrame = AXWindowBridge.currentFrame(for: winElement) else { return }
+    let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+    if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
+      focusedScreenID = id
+    }
   }
 
   // MARK: - Floating windows
@@ -1812,6 +1896,14 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       guard var workspace = screenState.workspaces[wsID] else { continue }
       for colIdx in workspace.columns.indices {
         if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          // A genuine minimum width can never approach the full usable screen width.
+          // Observed widths near the screen width indicate a transient state such as
+          // fullscreen exit — skip absorption to avoid locking the column at that width.
+          let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
+          guard observedWidth < usableWidth else {
+            tiler_debug("absorbMinWidth: skipping \(observedWidth) >= usable \(usableWidth) for wid=\(wid) (likely fullscreen transition)")
+            return
+          }
           workspace.columns[colIdx].measuredMinWidth = max(
             workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
           screenState.workspaces[wsID] = workspace
@@ -1830,6 +1922,14 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       guard var workspace = screenState.workspaces[wsID] else { continue }
       for colIdx in workspace.columns.indices {
         if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
+          // A genuine minimum height can never approach the full usable screen height.
+          // Observed heights near the screen height indicate a transient state such as
+          // fullscreen exit — skip absorption to avoid locking the column at that height.
+          let usableHeight = screenState.info.visibleFrame.height - 2 * gaps.outerGaps
+          guard observedHeight < usableHeight else {
+            tiler_debug("absorbMinHeight: skipping \(observedHeight) >= usable \(usableHeight) for wid=\(wid) (likely fullscreen transition)")
+            return
+          }
           workspace.columns[colIdx].measuredMinHeight = max(
             workspace.columns[colIdx].measuredMinHeight ?? 0, observedHeight)
           screenState.workspaces[wsID] = workspace
