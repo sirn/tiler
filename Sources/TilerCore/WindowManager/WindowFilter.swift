@@ -3,10 +3,13 @@ import ApplicationServices
 
 public enum WindowFilter {
   public static func isTileable(_ element: AXUIElement) -> Bool {
-    // Check role
+    // Check role. Emacs's NS port reports its main window with role AXTextField
+    // instead of AXWindow; accept it here and rely on the subrole + close-button
+    // checks below to confirm it is a genuine window.
     var role: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
-      let roleStr = role as? String, roleStr == kAXWindowRole
+      let roleStr = role as? String,
+      roleStr == kAXWindowRole || roleStr == "AXTextField"
     else {
       return false
     }
