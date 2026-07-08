@@ -1,28 +1,43 @@
 import AppKit
+import TilerCore
 
 /// A menu bar item showing occupied workspaces as a row of bordered numbers, with the
-/// current workspace inverted. Clicking opens a menu with an "Exit Tiler" item.
-final class StatusBarController {
+/// current workspace inverted. Clicking opens a menu with workspace-switch entries,
+/// a debug-logging toggle, and an "Exit Tiler" item.
+final class StatusBarController: NSObject {
   private let statusItem: NSStatusItem
 
-  init() {
+  /// Number of workspaces to list in the menu. Updated via `setWorkspaceCount`.
+  private var workspaceCount = 0
+  /// The currently active workspace on the active screen, for the checkmark.
+  private var currentWorkspace = 1
+
+  /// Called when the user picks a workspace from the menu. The index is 1-based.
+  var onSwitchWorkspace: ((Int) -> Void)?
+  /// Called when the user toggles the debug-logging menu item.
+  var onToggleDebugLogging: (() -> Void)?
+
+  override init() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    super.init()
     statusItem.button?.imagePosition = .imageOnly
-    let menu = NSMenu()
-    let exitItem = NSMenuItem(
-      title: "Exit Tiler",
-      action: #selector(NSApplication.terminate(_:)),
-      keyEquivalent: "q"
-    )
-    exitItem.target = NSApplication.shared
-    menu.addItem(exitItem)
-    statusItem.menu = menu
+    statusItem.menu = NSMenu()
+    statusItem.menu?.delegate = self
+    rebuildMenu()
   }
 
   /// Update the indicator to show `occupied` workspaces, drawing `current` inverted.
   func update(occupied: [Int], current: Int) {
+    self.currentWorkspace = current
     statusItem.button?.image = StatusBarController.indicatorImage(occupied: occupied, current: current)
   }
+
+  /// Set how many workspace entries the menu should list.
+  func setWorkspaceCount(_ count: Int) {
+    workspaceCount = max(0, count)
+    rebuildMenu()
+  }
+
   /// Toggle degraded-mode display. When true, show "⚠ Grant Accessibility" as
   /// the button title (no image) so the user sees permission is pending and can
   /// still open the Exit Tiler menu. When false, clear the title and restore
@@ -36,6 +51,55 @@ final class StatusBarController {
       statusItem.button?.title = ""
       statusItem.button?.imagePosition = .imageOnly
     }
+  }
+
+  // MARK: - Menu actions
+
+  @objc private func selectWorkspace(_ sender: NSMenuItem) {
+    onSwitchWorkspace?(sender.tag)
+  }
+
+  @objc private func toggleDebugLogging(_ sender: NSMenuItem) {
+    onToggleDebugLogging?()
+    sender.state = tilerDebugEnabled ? .on : .off
+  }
+
+  // MARK: - Menu construction
+
+  private func rebuildMenu() {
+    let menu = statusItem.menu ?? NSMenu()
+    menu.removeAllItems()
+
+    if workspaceCount > 0 {
+      for n in 1...workspaceCount {
+        let title = "Workspace \(n)"
+        let item = NSMenuItem(
+          title: title, action: #selector(selectWorkspace(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = n
+        menu.addItem(item)
+      }
+      menu.addItem(.separator())
+    }
+
+    let debugItem = NSMenuItem(
+      title: "Enable Debug Logging", action: #selector(toggleDebugLogging(_:)),
+      keyEquivalent: "")
+    debugItem.target = self
+    debugItem.state = tilerDebugEnabled ? .on : .off
+    menu.addItem(debugItem)
+
+    menu.addItem(.separator())
+
+    let exitItem = NSMenuItem(
+      title: "Exit Tiler",
+      action: #selector(NSApplication.terminate(_:)),
+      keyEquivalent: "q"
+    )
+    exitItem.target = NSApplication.shared
+    menu.addItem(exitItem)
+
+    statusItem.menu = menu
   }
 
   private static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
@@ -104,5 +168,15 @@ final class StatusBarController {
     }
     image.isTemplate = true
     return image
+  }
+}
+
+extension StatusBarController: NSMenuDelegate {
+  /// Refresh the checkmark on the current workspace each time the menu opens, so it
+  /// reflects the active screen after hotkey- or mouse-driven switches.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    for item in menu.items where item.action == #selector(selectWorkspace(_:)) {
+      item.state = item.tag == currentWorkspace ? .on : .off
+    }
   }
 }
