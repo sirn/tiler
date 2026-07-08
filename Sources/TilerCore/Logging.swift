@@ -10,8 +10,10 @@ public func tiler_log(_ message: String) {
   os_log(.default, log: OSLog.tiler, "%{public}s", message)
 }
 
-// Only emit when TILER_DEBUG is set — avoids log spam on every layout/reconcile cycle.
-public let tilerDebugEnabled = ProcessInfo.processInfo.environment["TILER_DEBUG"] != nil
+// Mutable so the menu-bar "Enable debug logging" item can toggle it at runtime;
+// defaults to the TILER_DEBUG environment variable so launching with TILER_DEBUG=1
+// still enables it from the start.
+public var tilerDebugEnabled = ProcessInfo.processInfo.environment["TILER_DEBUG"] != nil
 
 /// Debug-gated log for high-frequency tracing; emitted at default level only when TILER_DEBUG is set.
 public func tiler_debug(_ message: String) {

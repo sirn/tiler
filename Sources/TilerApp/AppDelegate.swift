@@ -79,6 +79,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     if let indicator = wm.workspaceIndicator() {
       statusBar.update(occupied: indicator.occupied, current: indicator.current)
     }
+    statusBar.setWorkspaceCount(wm.workspaceCount)
+    statusBar.onSwitchWorkspace = { [weak wm] n in
+      wm?.handleAction(.focusWorkspace(n))
+    }
+    statusBar.onToggleDebugLogging = {
+      tilerDebugEnabled.toggle()
+      tiler_log("Debug logging \(tilerDebugEnabled ? "enabled" : "disabled") via menu")
+    }
     wm.onWorkspaceIndicatorChanged = { [weak statusBar] indicator in
       statusBar?.update(occupied: indicator.occupied, current: indicator.current)
     }
