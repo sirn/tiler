@@ -858,6 +858,9 @@ public class WindowManager {
             workspace.columns.remove(at: colIdx)
             changed = true
             membershipChanged = true
+          } else if workspace.columns[colIdx].focusedWindowIndex >= workspace.columns[colIdx].windows.count {
+            workspace.columns[colIdx].focusedWindowIndex = workspace.columns[colIdx].windows.count - 1
+            changed = true
           }
         }
         if workspace.focusedColumnIndex >= workspace.columns.count && !workspace.columns.isEmpty {
@@ -1295,6 +1298,9 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
             changed = true
+          } else if workspace.columns[colIdx].focusedWindowIndex >= workspace.columns[colIdx].windows.count {
+            workspace.columns[colIdx].focusedWindowIndex = workspace.columns[colIdx].windows.count - 1
+            changed = true
           }
         }
         if workspace.focusedColumnIndex >= workspace.columns.count && !workspace.columns.isEmpty {
@@ -1555,10 +1561,11 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       workspace.focusedColumnIndex < workspace.columns.count
     else { return }
     let col = workspace.columns[workspace.focusedColumnIndex]
-    guard col.focusedWindowIndex < col.windows.count else { return }
-    let window = col.windows[col.focusedWindowIndex]
+    guard !col.windows.isEmpty else { return }
+    let focusedIdx = min(col.focusedWindowIndex, col.windows.count - 1)
+    let window = col.windows[focusedIdx]
     tiler_debug(
-      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(col.focusedWindowIndex) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.groupKey]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
+      "focus: col=\(workspace.focusedColumnIndex) winIdx=\(focusedIdx) tile=\(window.id) pid=\(window.pid) tileFrame=\(String(describing: appliedWindows[window.groupKey]?.frame)) storedElement=\(windowStore.element(for: window.id) != nil)")
 
     var targetElement = windowStore.element(for: window.id)
     var raisedWid = window.id
