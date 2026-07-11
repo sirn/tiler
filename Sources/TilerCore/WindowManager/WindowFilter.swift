@@ -29,9 +29,10 @@ public enum WindowFilter {
         // panels promoted to standalone windows in newer OS versions) report
         // AXStandardWindow but lack a close button — reject them.
         var closeButton: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-          element, kAXCloseButtonAttribute as CFString, &closeButton
-        ) == .success, closeButton != nil
+        guard
+          AXUIElementCopyAttributeValue(
+            element, kAXCloseButtonAttribute as CFString, &closeButton
+          ) == .success, closeButton != nil
         else {
           return false
         }
@@ -41,9 +42,10 @@ public enum WindowFilter {
         // Chromium extension popups which have AXUnknown subrole and no window
         // buttons.
         var closeButton: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-          element, kAXCloseButtonAttribute as CFString, &closeButton
-        ) == .success, closeButton != nil
+        guard
+          AXUIElementCopyAttributeValue(
+            element, kAXCloseButtonAttribute as CFString, &closeButton
+          ) == .success, closeButton != nil
         else {
           return false
         }

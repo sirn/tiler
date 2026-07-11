@@ -44,7 +44,10 @@ public struct GeneralConfig: Codable {
   public var minWindowWidth: CGFloat
   public var minWindowHeight: CGFloat
 
-  public init(outerGaps: CGFloat = 8, innerGaps: CGFloat = 6, columnGaps: CGFloat = 8, minWindowWidth: CGFloat = 300, minWindowHeight: CGFloat = 250) {
+  public init(
+    outerGaps: CGFloat = 8, innerGaps: CGFloat = 6, columnGaps: CGFloat = 8,
+    minWindowWidth: CGFloat = 300, minWindowHeight: CGFloat = 250
+  ) {
     self.outerGaps = outerGaps
     self.innerGaps = innerGaps
     self.columnGaps = columnGaps

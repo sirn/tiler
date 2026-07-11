@@ -43,8 +43,12 @@ public class ConfigLoader {
       if let og = general["outer_gaps"]?.double { config.general.outerGaps = max(0, CGFloat(og)) }
       if let ig = general["inner_gaps"]?.double { config.general.innerGaps = max(0, CGFloat(ig)) }
       if let cg = general["column_gaps"]?.double { config.general.columnGaps = max(0, CGFloat(cg)) }
-      if let mww = general["min_window_width"]?.double { config.general.minWindowWidth = max(0, CGFloat(mww)) }
-      if let mwh = general["min_window_height"]?.double { config.general.minWindowHeight = max(0, CGFloat(mwh)) }
+      if let mww = general["min_window_width"]?.double {
+        config.general.minWindowWidth = max(0, CGFloat(mww))
+      }
+      if let mwh = general["min_window_height"]?.double {
+        config.general.minWindowHeight = max(0, CGFloat(mwh))
+      }
     }
 
     // [layout]

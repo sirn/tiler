@@ -1,5 +1,5 @@
-import Foundation
 import CoreGraphics
+import Foundation
 
 extension Workspace {
 
@@ -7,7 +7,6 @@ extension Workspace {
     case left
     case right
   }
-
 
   /// niri-style consume-or-expel of the focused window in `direction`.
   /// - Stacked column (>1 window): EXPEL the focused window into its own new column on that side.

@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import XCTest
+
 @testable import TilerCore
 
 final class ReducerTests: XCTestCase {
@@ -35,7 +36,8 @@ final class ReducerTests: XCTestCase {
       let wins = (0..<count).map { j in
         makeWindowNode(id: UInt32(i * 100 + j + 1), title: "win\(i)-\(j)")
       }
-      return Column(windows: wins, focusedWindowIndex: 0, widthFraction: 1.0 / CGFloat(windowCounts.count))
+      return Column(
+        windows: wins, focusedWindowIndex: 0, widthFraction: 1.0 / CGFloat(windowCounts.count))
     }
     let ws = Workspace(id: 1, columns: cols, focusedColumnIndex: focus)
     let screen = ScreenState(info: makeScreen(), workspaces: [1: ws], activeWorkspaceID: 1)
@@ -185,7 +187,12 @@ final class ReducerTests: XCTestCase {
 
     let effects = Reducer.apply(.consumeOrExpelLeft, to: &state, env: env())
     XCTAssertEqual(state.screens[1]?.workspaces[1]?.columns.count, 2)
-    XCTAssertEqual(effects, [.refreshTabs(1, 1), .scheduleDeferredTabRefresh(1, 1), .raiseTabbedWindows(1, 1), .focusFocusedWindow(1, 1), .retile])
+    XCTAssertEqual(
+      effects,
+      [
+        .refreshTabs(1, 1), .scheduleDeferredTabRefresh(1, 1), .raiseTabbedWindows(1, 1),
+        .focusFocusedWindow(1, 1), .retile,
+      ])
   }
 
   // MARK: - No-op on invalid state

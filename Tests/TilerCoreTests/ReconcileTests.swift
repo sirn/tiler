@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import TilerCore
 
 final class ReconcileTests: XCTestCase {
@@ -33,7 +34,8 @@ final class ReconcileTests: XCTestCase {
 
   func testNoRecordIsGenuineMove() {
     let rect = NSRect(x: 10, y: 20, width: 300, height: 200)
-    XCTAssertEqual(classifyGeometryChange(observed: rect, applied: nil, tolerance: 2.0), .genuineMove)
+    XCTAssertEqual(
+      classifyGeometryChange(observed: rect, applied: nil, tolerance: 2.0), .genuineMove)
   }
 
   // MARK: - reconcilePlan tests

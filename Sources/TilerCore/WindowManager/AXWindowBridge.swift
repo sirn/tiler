@@ -2,7 +2,6 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-
 public enum AXWindowBridge {
   /// Primary screen height is the correct anchor for the global Cocoa coordinate system.
   /// macOS uses the primary screen as the global coordinate anchor, so the Cocoa↔AX
