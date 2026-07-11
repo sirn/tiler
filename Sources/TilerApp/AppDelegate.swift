@@ -100,6 +100,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Restore persisted workspace state
     wm.restoreState()
 
+    // Sync tiled focus to the OS focus we launched into, since no
+    // didActivateApplicationNotification fires for the already-frontmost app.
+    wm.syncFocusFromFrontmostApp()
+
     // Start the coalescing drain loop
     wm.start()
 

@@ -4,6 +4,7 @@ import Darwin
 
 public enum TilerEvent {
   case appLaunched(pid_t)
+  case appActivated(pid_t)
   case appTerminated(pid_t)
   case windowCreated(AXUIElement)
   case windowDestroyed(AXUIElement)
@@ -67,6 +68,10 @@ public class EventBroker {
         else { return }
         // registerAppObserver is a no-op if already registered
         self.registerAppObserver(pid: app.processIdentifier)
+        // kAXFocusedWindowChangedNotification only fires on intra-app focus
+        // changes, so a Cmd+Tab (or cross-app click) to an already-running app
+        // leaves the tiled focus stale. didActivate fires reliably for these.
+        self.onEvent?(.appActivated(app.processIdentifier))
         self.onEvent?(.appLaunched(app.processIdentifier))
       })
 
