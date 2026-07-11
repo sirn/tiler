@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import TilerCore
 
 final class ColumnOpsTests: XCTestCase {
@@ -8,10 +9,12 @@ final class ColumnOpsTests: XCTestCase {
   func testConsumeLoneIntoLeft() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [
-      Column(windows: [w1], focusedWindowIndex: 0),
-      Column(windows: [w2], focusedWindowIndex: 0),
-    ], focusedColumnIndex: 1)
+    var ws = Workspace(
+      id: 1,
+      columns: [
+        Column(windows: [w1], focusedWindowIndex: 0),
+        Column(windows: [w2], focusedWindowIndex: 0),
+      ], focusedColumnIndex: 1)
     XCTAssertTrue(ws.consumeOrExpel(direction: .left))
     XCTAssertEqual(ws.columns.count, 1)
     XCTAssertEqual(ws.columns[0].windows, [w1, w2])
@@ -22,8 +25,9 @@ final class ColumnOpsTests: XCTestCase {
   func testExpelStackedToRight() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [Column(windows: [w1, w2], focusedWindowIndex: 1)],
-                       focusedColumnIndex: 0)
+    var ws = Workspace(
+      id: 1, columns: [Column(windows: [w1, w2], focusedWindowIndex: 1)],
+      focusedColumnIndex: 0)
     XCTAssertTrue(ws.consumeOrExpel(direction: .right))
     XCTAssertEqual(ws.columns.count, 2)
     XCTAssertEqual(ws.columns[0].windows, [w1])
@@ -34,8 +38,9 @@ final class ColumnOpsTests: XCTestCase {
   func testExpelStackedToLeft() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [Column(windows: [w1, w2], focusedWindowIndex: 1)],
-                       focusedColumnIndex: 0)
+    var ws = Workspace(
+      id: 1, columns: [Column(windows: [w1, w2], focusedWindowIndex: 1)],
+      focusedColumnIndex: 0)
     XCTAssertTrue(ws.consumeOrExpel(direction: .left))
     XCTAssertEqual(ws.columns.count, 2)
     XCTAssertEqual(ws.columns[0].windows, [w2])
@@ -46,20 +51,24 @@ final class ColumnOpsTests: XCTestCase {
   func testConsumeNoLeftNeighborIsNoop() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [
-      Column(windows: [w1], focusedWindowIndex: 0),
-      Column(windows: [w2], focusedWindowIndex: 0),
-    ], focusedColumnIndex: 0)
+    var ws = Workspace(
+      id: 1,
+      columns: [
+        Column(windows: [w1], focusedWindowIndex: 0),
+        Column(windows: [w2], focusedWindowIndex: 0),
+      ], focusedColumnIndex: 0)
     XCTAssertFalse(ws.consumeOrExpel(direction: .left))
   }
 
   func testConsumeNoRightNeighborIsNoop() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [
-      Column(windows: [w1], focusedWindowIndex: 0),
-      Column(windows: [w2], focusedWindowIndex: 0),
-    ], focusedColumnIndex: 1)
+    var ws = Workspace(
+      id: 1,
+      columns: [
+        Column(windows: [w1], focusedWindowIndex: 0),
+        Column(windows: [w2], focusedWindowIndex: 0),
+      ], focusedColumnIndex: 1)
     XCTAssertFalse(ws.consumeOrExpel(direction: .right))
   }
 
@@ -67,15 +76,18 @@ final class ColumnOpsTests: XCTestCase {
 
   func testSwapBackingIDPreservesGroupKey() {
     let g = WindowNode.GroupKey(value: 42)
-    var ws = Workspace(id: 1, columns: [
-      Column(windows: [WindowNode(id: 100, groupKey: g, pid: 7, title: "old")], widthFraction: 0.5)
-    ])
+    var ws = Workspace(
+      id: 1,
+      columns: [
+        Column(
+          windows: [WindowNode(id: 100, groupKey: g, pid: 7, title: "old")], widthFraction: 0.5)
+      ])
     XCTAssertTrue(ws.swapBackingID(from: 100, to: 200, title: "new"))
     let node = ws.columns[0].windows[0]
-    XCTAssertEqual(node.id, 200)        // backing id changed
-    XCTAssertEqual(node.groupKey, g)    // stable identity preserved — the invariant
-    XCTAssertEqual(node.pid, 7)         // pid preserved
-    XCTAssertEqual(node.title, "new")   // title updated
+    XCTAssertEqual(node.id, 200)  // backing id changed
+    XCTAssertEqual(node.groupKey, g)  // stable identity preserved — the invariant
+    XCTAssertEqual(node.pid, 7)  // pid preserved
+    XCTAssertEqual(node.title, "new")  // title updated
   }
 
   func testSwapBackingIDPreservesPositionAndOtherTiles() {
@@ -101,7 +113,9 @@ final class ColumnOpsTests: XCTestCase {
 
   func testSwapBackingIDNoMatchReturnsNil() {
     let columns = [
-      Column(windows: [WindowNode(id: 100, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "x")], widthFraction: 0.5)
+      Column(
+        windows: [WindowNode(id: 100, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "x")],
+        widthFraction: 0.5)
     ]
     var ws = Workspace(id: 1, columns: columns)
     XCTAssertFalse(ws.swapBackingID(from: 999, to: 200, title: "y"))
@@ -110,10 +124,12 @@ final class ColumnOpsTests: XCTestCase {
   func testRoundTripConsumeThenExpel() {
     let w1 = WindowNode(id: 1, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "w1")
     let w2 = WindowNode(id: 2, groupKey: WindowNode.GroupKey(value: 2), pid: 1, title: "w2")
-    var ws = Workspace(id: 1, columns: [
-      Column(windows: [w1], focusedWindowIndex: 0),
-      Column(windows: [w2], focusedWindowIndex: 0),
-    ], focusedColumnIndex: 1)
+    var ws = Workspace(
+      id: 1,
+      columns: [
+        Column(windows: [w1], focusedWindowIndex: 0),
+        Column(windows: [w2], focusedWindowIndex: 0),
+      ], focusedColumnIndex: 1)
     XCTAssertTrue(ws.consumeOrExpel(direction: .left))
     XCTAssertEqual(ws.columns.count, 1)
     XCTAssertTrue(ws.consumeOrExpel(direction: .right))

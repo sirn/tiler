@@ -1,6 +1,6 @@
+import AppKit
 import Carbon
 import CoreGraphics
-import AppKit
 
 public class HotkeyDispatcher {
   public typealias ActionHandler = (Action) -> Void
@@ -54,7 +54,7 @@ public class HotkeyDispatcher {
       EventTypeSpec(
         eventClass: OSType(kEventClassKeyboard),
         eventKind: UInt32(kEventHotKeyPressed)
-      ),
+      )
     ]
 
     var handlerRef: EventHandlerRef?
@@ -94,7 +94,9 @@ public class HotkeyDispatcher {
       if regStatus == noErr, let ref {
         hotKeyRefs.append(ref)
       } else {
-        tiler_log("Failed to register hotkey for keyCode \(keyCode), modifiers \(modifiers) (status \(regStatus))")
+        tiler_log(
+          "Failed to register hotkey for keyCode \(keyCode), modifiers \(modifiers) (status \(regStatus))"
+        )
       }
     }
 
@@ -119,8 +121,8 @@ public class HotkeyDispatcher {
 
 private func carbonModifiers(from flags: CGEventFlags) -> UInt32 {
   var carbon: UInt32 = 0
-  if flags.contains(.maskCommand) { carbon |= UInt32(cmdKey) }      // 0x0100
-  if flags.contains(.maskShift) { carbon |= UInt32(shiftKey) }     // 0x0200
+  if flags.contains(.maskCommand) { carbon |= UInt32(cmdKey) }  // 0x0100
+  if flags.contains(.maskShift) { carbon |= UInt32(shiftKey) }  // 0x0200
   if flags.contains(.maskAlternate) { carbon |= UInt32(optionKey) }  // 0x0800
   if flags.contains(.maskControl) { carbon |= UInt32(controlKey) }  // 0x1000
   return carbon

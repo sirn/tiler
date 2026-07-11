@@ -155,7 +155,9 @@ public enum LayoutEngine {
             height: round(windowHeight)
           )
           result[displayOrder[i].id] = frame
-          tiler_debug("[LayoutEngine]     window \(displayOrder[i].id) (tab non-active) → frame(x=\(frame.minX), y=\(frame.minY), w=\(frame.width), h=\(frame.height))")
+          tiler_debug(
+            "[LayoutEngine]     window \(displayOrder[i].id) (tab non-active) → frame(x=\(frame.minX), y=\(frame.minY), w=\(frame.width), h=\(frame.height))"
+          )
         }
 
         // Active window: at the bottom, fully visible.
@@ -166,7 +168,9 @@ public enum LayoutEngine {
           height: round(windowHeight)
         )
         result[focused.id] = activeFrame
-        tiler_debug("[LayoutEngine]     window \(focused.id) (tab active) → frame(x=\(activeFrame.minX), y=\(activeFrame.minY), w=\(activeFrame.width), h=\(activeFrame.height))")
+        tiler_debug(
+          "[LayoutEngine]     window \(focused.id) (tab active) → frame(x=\(activeFrame.minX), y=\(activeFrame.minY), w=\(activeFrame.width), h=\(activeFrame.height))"
+        )
       }
     }
 

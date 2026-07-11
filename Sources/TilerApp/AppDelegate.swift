@@ -26,7 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       _ = AXIsProcessTrustedWithOptions(options)
       tiler_log(
         "Accessibility permission required. Grant it in System Settings > "
-        + "Privacy & Security > Accessibility; Tiler will start automatically once granted."
+          + "Privacy & Security > Accessibility; Tiler will start automatically once granted."
       )
       startPermissionPoll()
       // Show a degraded-mode menu bar item ("⚠ Grant Accessibility" + Exit Tiler
@@ -109,7 +109,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Set up hotkey dispatcher
     let dispatcher = HotkeyDispatcher()
-    let bindings = defaultKeybindings.merging(keybindingsFromConfig(config.keybinds)) { _, config in config }
+    let bindings = defaultKeybindings.merging(keybindingsFromConfig(config.keybinds)) { _, config in
+      config
+    }
     dispatcher.setBindings(bindings)
     dispatcher.setActionHandler { [weak self] action in
       self?.windowManager?.handleAction(action)
@@ -126,7 +128,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     permissionPollTimer = Timer.scheduledTimer(
       withTimeInterval: 2.0, repeats: true
     ) { [weak self] timer in
-      guard let self = self else { timer.invalidate(); return }
+      guard let self = self else {
+        timer.invalidate()
+        return
+      }
       guard AXIsProcessTrusted() else { return }
       timer.invalidate()
       self.permissionPollTimer = nil

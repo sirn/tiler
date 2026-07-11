@@ -29,7 +29,8 @@ final class StatusBarController: NSObject {
   /// Update the indicator to show `occupied` workspaces, drawing `current` inverted.
   func update(occupied: [Int], current: Int) {
     self.currentWorkspace = current
-    statusItem.button?.image = StatusBarController.indicatorImage(occupied: occupied, current: current)
+    statusItem.button?.image = StatusBarController.indicatorImage(
+      occupied: occupied, current: current)
   }
 
   /// Set how many workspace entries the menu should list.
@@ -128,7 +129,8 @@ final class StatusBarController: NSObject {
       let ts = (text as NSString).size(withAttributes: attrs)
       let w = ceil(ts.width) + paddingX * 2 + lineWidth
       let h = ceil(ts.height) + paddingY * 2 + lineWidth
-      return Box(text: text, frameSize: NSSize(width: w, height: h), textSize: ts, selected: n == current)
+      return Box(
+        text: text, frameSize: NSSize(width: w, height: h), textSize: ts, selected: n == current)
     }
 
     guard !boxes.isEmpty else { return NSImage(size: NSSize(width: 1, height: 1)) }

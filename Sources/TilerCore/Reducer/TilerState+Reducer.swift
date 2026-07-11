@@ -6,7 +6,8 @@ extension TilerState {
     _ body: (ScreenID, inout ScreenState) -> [Effect]
   ) -> [Effect] {
     guard let screenID = env.activeScreenID,
-          var screenState = screens[screenID] else { return [] }
+      var screenState = screens[screenID]
+    else { return [] }
     let effects = body(screenID, &screenState)
     screens[screenID] = screenState
     return effects
