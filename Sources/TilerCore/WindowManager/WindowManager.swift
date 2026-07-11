@@ -477,6 +477,8 @@ public class WindowManager {
     switch event {
     case .appLaunched:
       setNeedsReconcile()
+    case .appActivated(let pid):
+      syncFocusFromActivatedApp(pid: pid)
     case .appTerminated(let pid):
       // Prune floating windows before windowStore forgets the pid
       floatingWindows = floatingWindows.filter { wid in
@@ -1104,6 +1106,61 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
   tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
   setNeedsReconcile()
 }
+
+  /// Handles the app-activation case `kAXFocusedWindowChangedNotification` misses:
+  /// that notification only fires on intra-app focus changes, so a Cmd+Tab or
+  /// cross-app click to an already-running app leaves the tiled focus indices stale.
+  private func syncFocusFromActivatedApp(pid: pid_t) {
+    // An activation is the latest focus truth, so it supersedes any prior
+    // unresolved pending focus from kAXFocusedWindowChangedNotification —
+    // otherwise the accompanying reconcile could replay that stale entry and
+    // overwrite the focus we are about to set here.
+    pendingFocus = nil
+    pendingFocusAttempts = 0
+
+    let appElement = AXUIElementCreateApplication(pid)
+    var focusedWindowRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
+      let ref = focusedWindowRef
+    else {
+      syncFocusedScreenFromAX()
+      return
+    }
+    let winElement = ref as! AXUIElement
+    let wid = windowStore.windowID(for: winElement) ?? windowStore.windowIDByIdentity(for: winElement)
+    guard let wid = wid else {
+      // Focused window exists but its CGWindowID can't be resolved. Keep the
+      // screen in sync from its frame so navigation still targets the right screen.
+      if let axFrame = AXWindowBridge.currentFrame(for: winElement) {
+        let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+        if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
+          focusedScreenID = id
+        }
+      }
+      return
+    }
+    if floatingWindows.contains(wid) {
+      return
+    }
+    if updateFocus(windowID: wid) {
+      return
+    }
+    // wid resolved but not yet in any tiled column (e.g. a fresh tab CGWindowID
+    // pre-reconcile). Queue a replay so reconcile updates the focus indices once
+    // the window is adopted, mirroring handleFocusChanged.
+    pendingFocus = (wid: wid, element: winElement, pid: pid)
+    pendingFocusAttempts = 0
+    setNeedsReconcile()
+  }
+
+  /// At startup no `didActivateApplicationNotification` has fired yet, so the
+  /// frontmost app's focus would otherwise be untracked.
+  public func syncFocusFromFrontmostApp() {
+    guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+    syncFocusFromActivatedApp(pid: frontApp.processIdentifier)
+  }
 
   // MARK: - State mutations
 
