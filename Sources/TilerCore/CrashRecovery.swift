@@ -3,7 +3,7 @@ import ApplicationServices
 import CoreGraphics
 import Darwin
 
-// --- Recovery file path ---
+// Recovery file path
 
 public func TilerCrashRecoveryFilePath() -> String {
     let appSupport = FileManager.default.urls(
@@ -13,7 +13,7 @@ public func TilerCrashRecoveryFilePath() -> String {
     return dir.appendingPathComponent("crash_recovery.json").path
 }
 
-// --- Signal handler ---
+// Signal handler
 //
 // The signal handler must be async-signal-safe. We use posix_spawn to
 // relaunch the Tiler binary with a --crash-recovery flag so a fresh
@@ -31,8 +31,6 @@ private var crashRecoveryBinaryPath: [CChar] = []
 private var crashRecoveryArg: [CChar] = Array("--crash-recovery".utf8.map { CChar($0) }) + [0]
 
 private func crashSignalHandler(_ sig: Int32) {
-    // Relaunch ourselves with --crash-recovery to gather windows.
-    // Construct argv from the stored C strings.
     crashRecoveryBinaryPath.withUnsafeMutableBufferPointer { binaryPathBuf in
         crashRecoveryArg.withUnsafeMutableBufferPointer { argBuf in
             var argv: [UnsafeMutablePointer<CChar>?] = [
@@ -48,7 +46,6 @@ private func crashSignalHandler(_ sig: Int32) {
         }
     }
 
-    // Parent: restore default handler and re-raise.
     signal(sig, SIG_DFL)
     raise(sig)
 }
@@ -63,7 +60,7 @@ public func TilerInstallCrashHandlers() {
     }
 }
 
-// --- Window gathering (runs in a fresh process after crash) ---
+// Window gathering (runs in a fresh process after crash)
 
 public func TilerCrashRecoveryGather() {
     let path = TilerCrashRecoveryFilePath()
@@ -115,7 +112,6 @@ public func TilerCrashRecoveryGather() {
 
         var target = windowFrame
 
-        // Check if the window intersects the visible frame at all.
         let intersects = windowFrame.intersects(visibleFrame)
 
         if intersects {
@@ -138,7 +134,6 @@ public func TilerCrashRecoveryGather() {
 
         if target == windowFrame { continue }
 
-        // Apply the new position via AX.
         let appElement = AXUIElementCreateApplication(ownerPID)
 
         var windowsRef: CFTypeRef?
