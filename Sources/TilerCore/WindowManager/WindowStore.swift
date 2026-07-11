@@ -43,7 +43,6 @@ public final class WindowStore {
     // Union: also process managed pids not in the on-screen CG list
     let allPIDs = Set(cgWindowsByPID.keys).union(managedPIDs)
 
-    // Second pass: iterate each PID and match via AX
     for pid in allPIDs {
       let cgWindows = cgWindowsByPID[pid] ?? []
       let appElement = AXUIElementCreateApplication(pid)
@@ -97,7 +96,6 @@ public final class WindowStore {
       tiler_debug(
         "WindowStore: PID \(pid) - found \(axWindows.count) AX windows, \(cgWindows.count) CG windows"
       )
-      // Track which CGWindowIDs we've matched
       var matchedCG: Set<CGWindowID> = []
 
       // Position-heuristic fallbacks are only safe when there's at most one AX window
@@ -110,7 +108,6 @@ public final class WindowStore {
       // if Apple removes the symbol.
       for axWindow in axWindows {
         if let foundWid = axGetWindowID(axWindow) {
-          // Exact match via runtime-resolved private API
           elements[foundWid] = axWindow
           pidWindows[pid, default: []].insert(foundWid)
           matchedCG.insert(foundWid)
@@ -158,7 +155,6 @@ public final class WindowStore {
         // window — it will be picked up once axGetWindowID succeeds
       }
 
-      // Secondary fallback: only for single-window apps where the primary pass missed
       if allowPositionFallback {
         for cgw in cgWindows where !matchedCG.contains(cgw.wid) {
           var axPos: CFTypeRef?
@@ -202,7 +198,6 @@ public final class WindowStore {
     }
   }
 
-  /// Get the AXUIElement for a CGWindowID.
   public func element(for id: CGWindowID) -> AXUIElement? {
     return elements[id]
   }
@@ -282,7 +277,6 @@ public final class WindowStore {
     return nil
   }
 
-  /// Get the CGWindowID for an AXUIElement via axGetWindowID.
   public func windowID(for element: AXUIElement) -> CGWindowID? {
     return axGetWindowID(element)
   }
@@ -296,7 +290,6 @@ public final class WindowStore {
     return nil
   }
 
-  /// Remove all state for a terminated PID.
   public func forget(pid: pid_t) {
     guard let ids = pidWindows[pid] else { return }
     for wid in ids {
@@ -305,7 +298,6 @@ public final class WindowStore {
     pidWindows.removeValue(forKey: pid)
   }
 
-  /// Get all CGWindowIDs currently tracked for a given PID.
   public func wids(for pid: pid_t) -> Set<CGWindowID> {
     return pidWindows[pid] ?? []
   }

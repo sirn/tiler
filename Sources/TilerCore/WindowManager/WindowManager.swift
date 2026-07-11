@@ -294,7 +294,7 @@ public class WindowManager {
         unmatchedPersistedKeys.append(screenIDStr)
         continue
       }
-        matchedCurrentIDs.insert(screenID)
+      matchedCurrentIDs.insert(screenID)
 
       if persistedScreen.activeWorkspaceID >= 1 && persistedScreen.activeWorkspaceID <= workspaceCount {
         screenState.activeWorkspaceID = persistedScreen.activeWorkspaceID
@@ -409,7 +409,6 @@ public class WindowManager {
       columnGaps: config.general.columnGaps
     )
     self.layoutConfig = config.layout
-
 
     let oldCount = workspaceCount
     self.workspaceCount = max(1, config.workspaces.count)
@@ -721,7 +720,6 @@ public class WindowManager {
         tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
       }
     }
-
 
     // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
     // When all managed windows vanish simultaneously, treat the pass as unreliable.
@@ -1043,69 +1041,69 @@ public class WindowManager {
     appliedWindows = appliedWindows.filter { liveGroupKeys.contains($0.key) }
   }
 
-private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
-  var wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
-  // Use the resolved element for downstream frame reads / pending storage. When the
-  // notification element is stale we replace it with the live focused window below.
-  var focusElement = element
+  private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
+    var wid = windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+    // Use the resolved element for downstream frame reads / pending storage. When the
+    // notification element is stale we replace it with the live focused window below.
+    var focusElement = element
 
-  // The notification element can be stale or fail to resolve (transient _AXUIElementGetWindow
-  // failure). Re-derive the focused window from kAXFocusedWindowAttribute before queuing a
-  // replay — this is the same fallback used in the pendingFocus replay path below. Carry the
-  // resolved element forward so the screen update and pending replay use the live focused
-  // window, not the stale notification element.
-  if wid == nil {
-    let appElement = AXUIElementCreateApplication(pid)
-    var focusedWindowRef: CFTypeRef?
-    if AXUIElementCopyAttributeValue(
-      appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
-    ) == .success, let ref = focusedWindowRef {
-      let winElement = ref as! AXUIElement
-      wid = windowStore.windowID(for: winElement)
-        ?? windowStore.windowIDByIdentity(for: winElement)
-      if wid != nil {
-        focusElement = winElement
-        tiler_debug("handleFocusChanged: notification element stale, AX fallback wid=\(wid!) pid=\(pid)")
+    // The notification element can be stale or fail to resolve (transient _AXUIElementGetWindow
+    // failure). Re-derive the focused window from kAXFocusedWindowAttribute before queuing a
+    // replay — this is the same fallback used in the pendingFocus replay path below. Carry the
+    // resolved element forward so the screen update and pending replay use the live focused
+    // window, not the stale notification element.
+    if wid == nil {
+      let appElement = AXUIElementCreateApplication(pid)
+      var focusedWindowRef: CFTypeRef?
+      if AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef
+      ) == .success, let ref = focusedWindowRef {
+        let winElement = ref as! AXUIElement
+        wid = windowStore.windowID(for: winElement)
+          ?? windowStore.windowIDByIdentity(for: winElement)
+        if wid != nil {
+          focusElement = winElement
+          tiler_debug("handleFocusChanged: notification element stale, AX fallback wid=\(wid!) pid=\(pid)")
+        }
       }
     }
-  }
 
-  guard let wid = wid else {
+    guard let wid = wid else {
+      if let axFrame = AXWindowBridge.currentFrame(for: focusElement) {
+        let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
+        if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
+          focusedScreenID = id
+        }
+      }
+      pendingFocus = (wid: nil, element: focusElement, pid: pid)
+      pendingFocusAttempts = 0
+      tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
+      setNeedsReconcile()
+      return
+    }
+
+    // Floating windows are not managed by the tiler
+    if floatingWindows.contains(wid) {
+      return
+    }
+
+    if updateFocus(windowID: wid) {
+      pendingFocus = nil
+      return
+    }
+
+    // wid resolved but not yet in any tiled column (e.g. fresh tab CGWindowID pre-reconcile)
     if let axFrame = AXWindowBridge.currentFrame(for: focusElement) {
       let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
       if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
         focusedScreenID = id
       }
     }
-    pendingFocus = (wid: nil, element: focusElement, pid: pid)
+    pendingFocus = (wid: wid, element: focusElement, pid: pid)
     pendingFocusAttempts = 0
-    tiler_log("handleFocusChanged: axGetWindowID failed for pid \(pid), queuing focus replay")
+    tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
     setNeedsReconcile()
-    return
   }
-
-  // Floating windows are not managed by the tiler
-  if floatingWindows.contains(wid) {
-    return
-  }
-
-  if updateFocus(windowID: wid) {
-    pendingFocus = nil
-    return
-  }
-
-  // wid resolved but not yet in any tiled column (e.g. fresh tab CGWindowID pre-reconcile)
-  if let axFrame = AXWindowBridge.currentFrame(for: focusElement) {
-    let midpoint = CGPoint(x: axFrame.midX, y: axFrame.midY)
-    if let id = NSScreen.screens.first(where: { $0.visibleFrame.contains(midpoint) })?.displayID {
-      focusedScreenID = id
-    }
-  }
-  pendingFocus = (wid: wid, element: focusElement, pid: pid)
-  pendingFocusAttempts = 0
-  tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
-  setNeedsReconcile()
-}
 
   /// Handles the app-activation case `kAXFocusedWindowChangedNotification` misses:
   /// that notification only fires on intra-app focus changes, so a Cmd+Tab or
@@ -1197,7 +1195,6 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     }
     return activeScreenID()
   }
-
 
   public func activeWorkspaceID() -> WorkspaceID? {
     guard let screenID = activeScreenID() else { return nil }
@@ -1374,25 +1371,25 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
     }
   }
 
-@discardableResult
-private func updateFocus(windowID: CGWindowID) -> Bool {
-  for (screenID, var screenState) in state.screens {
-    for (wsID, var workspace) in screenState.workspaces {
-      for (colIdx, var column) in workspace.columns.enumerated() {
-        if let winIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
-          column.focusedWindowIndex = winIdx
-          workspace.columns[colIdx] = column
-          workspace.focusedColumnIndex = colIdx
-          screenState.workspaces[wsID] = workspace
-          state.screens[screenID] = screenState
-          focusedScreenID = screenID
-          return true
+  @discardableResult
+  private func updateFocus(windowID: CGWindowID) -> Bool {
+    for (screenID, var screenState) in state.screens {
+      for (wsID, var workspace) in screenState.workspaces {
+        for (colIdx, var column) in workspace.columns.enumerated() {
+          if let winIdx = column.windows.firstIndex(where: { $0.id == windowID }) {
+            column.focusedWindowIndex = winIdx
+            workspace.columns[colIdx] = column
+            workspace.focusedColumnIndex = colIdx
+            screenState.workspaces[wsID] = workspace
+            state.screens[screenID] = screenState
+            focusedScreenID = screenID
+            return true
+          }
         }
       }
     }
+    return false
   }
-  return false
-}
 
   /// The stable groupKey of the tile currently backed by `wid`, or nil if `wid` isn't a tile.
   private func groupKey(forID wid: CGWindowID) -> WindowNode.GroupKey? {
@@ -1509,7 +1506,6 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
       tiler_log("Floated window wid=\(window.id)")
     }
   }
-
 
   private func computeEnv() -> ReducerEnv {
     ReducerEnv(
@@ -1847,8 +1843,6 @@ private func updateFocus(windowID: CGWindowID) -> Bool {
     }
     return false
   }
-
-
 
   private func hideInactiveWorkspaces() {
     guard activeScreenID() != nil, activeWorkspaceID() != nil

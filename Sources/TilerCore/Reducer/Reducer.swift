@@ -221,7 +221,6 @@ enum Reducer {
       else { return [] }
       let targetID = env.orderedScreenIDs[(currentIdx - 1 + env.orderedScreenIDs.count) % env.orderedScreenIDs.count]
 
-      // Extract window from source screen
       var extractedWindow: WindowNode?
       var extractedWidthFraction: CGFloat = 0.5
       let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
@@ -256,7 +255,6 @@ enum Reducer {
 
       guard let window = extractedWindow else { return sourceEffects }
 
-      // Insert window into target screen
       let targetEffects = state.withScreen(targetID) { targetID, targetScreen in
         let targetWSID = targetScreen.activeWorkspaceID
         guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }
@@ -285,7 +283,6 @@ enum Reducer {
       else { return [] }
       let targetID = env.orderedScreenIDs[(currentIdx + 1) % env.orderedScreenIDs.count]
 
-      // Extract window from source screen
       var extractedWindow: WindowNode?
       var extractedWidthFraction: CGFloat = 0.5
       let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
@@ -320,7 +317,6 @@ enum Reducer {
 
       guard let window = extractedWindow else { return sourceEffects }
 
-      // Insert window into target screen
       let targetEffects = state.withScreen(targetID) { targetID, targetScreen in
         let targetWSID = targetScreen.activeWorkspaceID
         guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }

@@ -8,7 +8,6 @@ extension Workspace {
     case right
   }
 
-
   /// niri-style consume-or-expel of the focused window in `direction`.
   /// - Stacked column (>1 window): EXPEL the focused window into its own new column on that side.
   /// - Lone window: CONSUME it into the neighboring column on that side (append to its stack),
