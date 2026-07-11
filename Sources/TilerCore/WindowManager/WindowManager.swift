@@ -477,6 +477,8 @@ public class WindowManager {
     switch event {
     case .appLaunched:
       setNeedsReconcile()
+    case .appActivated(let pid):
+      syncFocusFromActivatedApp(pid: pid)
     case .appTerminated(let pid):
       // Prune floating windows before windowStore forgets the pid
       floatingWindows = floatingWindows.filter { wid in
@@ -1104,6 +1106,32 @@ private func handleFocusChanged(pid: pid_t, element: AXUIElement) {
   tiler_log("handleFocusChanged: wid \(wid) not yet tiled, queuing focus replay")
   setNeedsReconcile()
 }
+
+  /// Sync the tiled focus state (focused column/window + screen) from the app that
+  /// just became frontmost. `kAXFocusedWindowChangedNotification` only fires on
+  /// intra-app focus changes, so switching to an already-running app via Cmd+Tab (or
+  /// a cross-app click) leaves the tiled focus indices stale. This runs on every
+  /// app activation to mirror the real OS focus into state.
+  private func syncFocusFromActivatedApp(pid: pid_t) {
+    let appElement = AXUIElementCreateApplication(pid)
+    var focusedWindowRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
+      let ref = focusedWindowRef
+    else {
+      syncFocusedScreenFromAX()
+      return
+    }
+    let winElement = ref as! AXUIElement
+    let wid = windowStore.windowID(for: winElement) ?? windowStore.windowIDByIdentity(for: winElement)
+    if let wid = wid, !floatingWindows.contains(wid), updateFocus(windowID: wid) {
+      return
+    }
+    // Not managed or floating — still keep the focused screen in sync so navigation
+    // targets the screen the user is actually on.
+    syncFocusedScreenFromAX()
+  }
 
   // MARK: - State mutations
 
