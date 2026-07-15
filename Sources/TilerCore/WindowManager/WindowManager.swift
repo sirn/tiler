@@ -1985,6 +1985,7 @@ public class WindowManager {
       }
     }
 
+    var reissues: [CGWindowID: NSRect] = [:]
     for (gk, record) in appliedWindows where record.epoch == applyEpoch && idForGroup[gk] != nil {
       let wid = idForGroup[gk]!
       guard let element = windowStore.element(for: wid) else { continue }
@@ -1996,8 +1997,8 @@ public class WindowManager {
         tiler_debug(
           "correct: wid=\(wid) re-issue attempt=\((appliedWindows[gk]?.corrections ?? 0) + 1) observed=\(observed) intended=\(record.frame)"
         )
-        AXWindowBridge.applyFrames([wid: record.frame], store: windowStore)
         appliedWindows[gk]?.corrections += 1
+        reissues[wid] = record.frame
       } else {
         // Budget exhausted: the window won't reach the exact frame (min-size or
         // character-cell quantization). If it's wider than desired, absorb that into
@@ -2015,6 +2016,12 @@ public class WindowManager {
           appliedWindows[gk]?.frame = observed
         }
       }
+    }
+
+    // Re-issue all pending frames in a single batched write so EUI toggling and
+    // per-process AX round-trips happen once per drain cycle instead of per window.
+    if !reissues.isEmpty {
+      AXWindowBridge.applyFrames(reissues, store: windowStore)
     }
   }
 
