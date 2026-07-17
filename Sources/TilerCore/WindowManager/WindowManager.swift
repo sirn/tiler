@@ -75,6 +75,11 @@ public class WindowManager {
   private var isFirstReconcile = true
   private var consumeRefreshToken: UInt64 = 0
   private var hadNoElementLastPass: Bool = false
+
+  // Per-window exponential backoff for no-element position-resolve, so an event
+  // storm cannot hammer AX with repeated scans for a window whose element isn't
+  // available yet. The poll reconcile still guarantees eventual resolution.
+  private var noElementRetry: [CGWindowID: (attempts: Int, nextAttemptAt: Date)] = [:]
   /// Window IDs that were not-tileable in the previous reconcile (e.g. fullscreen,
   /// minimized). Used to detect transitions back to tileable so we can reset
   /// stale measuredMinWidth/measuredMinHeight that may have been absorbed during
@@ -731,12 +736,22 @@ public class WindowManager {
     // AX element hasn't appeared yet, and managed windows that lost their mapping due
     // to a transient axGetWindowID failure during refresh(). Position-matching is safe
     // here because we match against unmapped AX windows only, with ambiguity detection.
+    let resolveNow = Date()
     for wid in noElementCandidates {
       guard let info = windowInfo[wid] else { continue }
+      if let retry = noElementRetry[wid], resolveNow < retry.nextAttemptAt {
+        continue
+      }
       guard let element = windowStore.tryPositionResolve(pid: info.pid, cgBounds: info.bounds)
-      else { continue }
+      else {
+        let attempts = (noElementRetry[wid]?.attempts ?? 0) + 1
+        let delay = min(pow(2.0, Double(attempts)) * 0.1, 5.0)
+        noElementRetry[wid] = (attempts: attempts, nextAttemptAt: resolveNow.addingTimeInterval(delay))
+        continue
+      }
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
+      noElementRetry.removeValue(forKey: wid)
       if WindowFilter.isTileable(element) {
         tileableIDs.insert(wid)
         if managedIDs.contains(wid) {
@@ -748,6 +763,7 @@ public class WindowManager {
         tiler_debug("reconcile: position-resolved not-tileable wid=\(wid) pid=\(info.pid)")
       }
     }
+    noElementRetry = noElementRetry.filter { noElementCandidates.contains($0.key) }
 
     // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
     // Only treat the pass as a mass disappearance when the scan itself returned no
