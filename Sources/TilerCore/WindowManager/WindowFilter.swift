@@ -50,6 +50,8 @@ public enum WindowFilter {
           return false
         }
       }
+    } else {
+      return false
     }
 
     // Check minimized

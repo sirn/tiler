@@ -304,6 +304,10 @@ enum Reducer {
     let count = env.orderedScreenIDs.count
     let targetID = env.orderedScreenIDs[(currentIdx + offset + count) % count]
 
+    guard let targetScreen = state.screens[targetID],
+      targetScreen.workspaces[targetScreen.activeWorkspaceID] != nil
+    else { return [] }
+
     var extractedWindow: WindowNode?
     var extractedWidthFraction: CGFloat = 0.5
     let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
