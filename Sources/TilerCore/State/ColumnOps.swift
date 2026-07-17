@@ -26,6 +26,7 @@ extension Workspace {
     if col.windows.count > 1 {
       cols[focusedColumnIndex].windows.remove(at: winIdx)
       cols[focusedColumnIndex].measuredMinWidth = nil
+      cols[focusedColumnIndex].measuredMinHeight = nil
       if cols[focusedColumnIndex].focusedWindowIndex >= cols[focusedColumnIndex].windows.count {
         cols[focusedColumnIndex].focusedWindowIndex = cols[focusedColumnIndex].windows.count - 1
       }
@@ -44,6 +45,7 @@ extension Workspace {
       cols[adjustedTarget].windows.append(win)
       cols[adjustedTarget].focusedWindowIndex = cols[adjustedTarget].windows.count - 1
       cols[adjustedTarget].measuredMinWidth = nil
+      cols[adjustedTarget].measuredMinHeight = nil
       columns = cols
       self.focusedColumnIndex = adjustedTarget
       return true
