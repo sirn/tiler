@@ -118,7 +118,7 @@ public class WindowManager {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.reconfigureScreens()
+      self?.scheduleScreenReconfigure()
     }
     screenLockObserver = DistributedNotificationCenter.default().addObserver(
       forName: NSNotification.Name("com.apple.screenIsLocked"),
@@ -2145,6 +2145,20 @@ public class WindowManager {
   }
 
   // MARK: - Screen reconfiguration
+
+  // Coalesce didChangeScreenParameters notifications and re-read NSScreen.screens
+  // after the display state has settled. macOS Tahoe can fire this notification
+  // repeatedly with stale geometry on wake; acting only on the trailing event avoids
+  // thrashing the screen map and adopting transient incorrect frames.
+  private var screenReconfigToken: UInt64 = 0
+  private func scheduleScreenReconfigure() {
+    screenReconfigToken &+= 1
+    let token = screenReconfigToken
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      guard let self = self, self.screenReconfigToken == token else { return }
+      self.reconfigureScreens()
+    }
+  }
 
   private func reconfigureScreens() {
     let current = NSScreen.screens
