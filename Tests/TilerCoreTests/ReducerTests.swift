@@ -92,6 +92,33 @@ final class ReducerTests: XCTestCase {
     XCTAssertTrue(effects.isEmpty)
   }
 
+  // MARK: - Column focus wrap
+
+  func testFocusColumnLeftWrapsWithinScreen() {
+    var state = makeWindowState(fractions: [0.5, 0.5], focus: 0)
+    var env = self.env()
+    env.focusColumnWrap = true
+    let effects = Reducer.apply(.focusColumnLeft, to: &state, env: env)
+    XCTAssertEqual(state.screens[1]?.workspaces[1]?.focusedColumnIndex, 1)
+    XCTAssertEqual(effects, [.focusFocusedWindow(1, 1), .retile])
+  }
+
+  func testFocusColumnRightWrapsWithinScreen() {
+    var state = makeWindowState(fractions: [0.5, 0.5], focus: 1)
+    var env = self.env()
+    env.focusColumnWrap = true
+    let effects = Reducer.apply(.focusColumnRight, to: &state, env: env)
+    XCTAssertEqual(state.screens[1]?.workspaces[1]?.focusedColumnIndex, 0)
+    XCTAssertEqual(effects, [.focusFocusedWindow(1, 1), .retile])
+  }
+
+  func testFocusColumnLeftNoWrapIsNoOpAtLeftEdgeSingleScreen() {
+    var state = makeWindowState(fractions: [0.5, 0.5], focus: 0)
+    let effects = Reducer.apply(.focusColumnLeft, to: &state, env: env())
+    XCTAssertEqual(state.screens[1]?.workspaces[1]?.focusedColumnIndex, 0)
+    XCTAssertTrue(effects.isEmpty)
+  }
+
   // MARK: - Move to workspace
 
   func testMoveToWorkspaceTransfersWindow() {

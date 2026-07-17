@@ -28,6 +28,19 @@ enum Reducer {
   ) -> [Effect] {
     switch action {
     case .focusColumnLeft:
+      if env.focusColumnWrap {
+        return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
+          guard !ws.columns.isEmpty else { return [] }
+          if ws.focusedColumnIndex > 0 {
+            ws.focusedColumnIndex -= 1
+          } else if ws.columns.count > 1 {
+            ws.focusedColumnIndex = ws.columns.count - 1
+          } else {
+            return []
+          }
+          return [.focusFocusedWindow(screenID, wsID), .retile]
+        }
+      }
       if let screenID = env.activeScreenID,
         let ss = state.screens[screenID],
         let currentWS = ss.workspaces[ss.activeWorkspaceID],
@@ -53,6 +66,19 @@ enum Reducer {
       }
 
     case .focusColumnRight:
+      if env.focusColumnWrap {
+        return state.withActiveWorkspace(env: env) { screenID, wsID, ws in
+          guard !ws.columns.isEmpty else { return [] }
+          if ws.focusedColumnIndex < ws.columns.count - 1 {
+            ws.focusedColumnIndex += 1
+          } else if ws.columns.count > 1 {
+            ws.focusedColumnIndex = 0
+          } else {
+            return []
+          }
+          return [.focusFocusedWindow(screenID, wsID), .retile]
+        }
+      }
       if let screenID = env.activeScreenID,
         let ss = state.screens[screenID],
         let ws = ss.workspaces[ss.activeWorkspaceID],
