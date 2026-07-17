@@ -502,7 +502,9 @@ public class WindowManager {
         floatingWindows.removeValue(forKey: wid)
       }
       windowStore.forget(pid: pid)
-      removeWindowsForPID(pid)
+      if removeWindowsForPID(pid) {
+        needsSave = true
+      }
       setNeedsRetile()
     case .windowCreated:
       setNeedsReconcile()
@@ -735,6 +737,9 @@ public class WindowManager {
       else { continue }
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
+      if managedIDs.contains(wid) {
+        stillAlive.insert(wid)
+      }
       if WindowFilter.isTileable(element) {
         tileableIDs.insert(wid)
         tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
@@ -1065,11 +1070,10 @@ public class WindowManager {
         pendingFocusAttempts = 0
       } else {
         // While the target is still in its open-animation settling window,
-        // updateFocus cannot succeed; don't burn the retry budget, just reschedule.
+        // updateFocus cannot succeed and the settle recheck will reschedule
+        // reconcile, so neither burn the retry budget nor spin the main queue.
         let settling = replayWid.map { settlingWindows[$0] != nil } ?? false
-        if settling {
-          setNeedsReconcile()
-        } else {
+        if !settling {
           pendingFocusAttempts += 1
           if pendingFocusAttempts >= 8 {
             tiler_log(
@@ -1413,7 +1417,9 @@ public class WindowManager {
     }
   }
 
-  private func removeWindowsForPID(_ pid: pid_t) {
+  @discardableResult
+  private func removeWindowsForPID(_ pid: pid_t) -> Bool {
+    var anyChanged = false
     for (screenID, var screenState) in state.screens {
       var screenChanged = false
       for (wsID, var workspace) in screenState.workspaces {
@@ -1451,8 +1457,10 @@ public class WindowManager {
       }
       if screenChanged {
         state.screens[screenID] = screenState
+        anyChanged = true
       }
     }
+    return anyChanged
   }
 
   @discardableResult
