@@ -97,7 +97,7 @@ public class WindowManager {
       innerGaps: config.general.innerGaps,
       columnGaps: config.general.columnGaps
     )
-    self.workspaceCount = config.workspaces.count
+    self.workspaceCount = max(1, config.workspaces.count)
     self.layoutConfig = config.layout
     self.minWindowWidth = config.general.minWindowWidth
     self.minWindowHeight = config.general.minWindowHeight
@@ -408,7 +408,7 @@ public class WindowManager {
     workspace.focusedColumnIndex =
       restoredColumns.isEmpty
       ? 0
-      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+      : min(max(persistedWS.focusedColumnIndex, 0), restoredColumns.count - 1)
   }
 
   // MARK: - Config
@@ -422,6 +422,8 @@ public class WindowManager {
       columnGaps: config.general.columnGaps
     )
     self.layoutConfig = config.layout
+    self.minWindowWidth = config.general.minWindowWidth
+    self.minWindowHeight = config.general.minWindowHeight
 
     let oldCount = workspaceCount
     self.workspaceCount = max(1, config.workspaces.count)
@@ -505,7 +507,12 @@ public class WindowManager {
       setNeedsRetile()
     case .windowCreated:
       setNeedsReconcile()
-    case .windowDestroyed:
+    case .windowDestroyed(let element):
+      let destroyedWID =
+        windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+      if let destroyedWID = destroyedWID {
+        floatingWindows.remove(destroyedWID)
+      }
       setNeedsReconcile()
     case .windowMinimized:
       setNeedsReconcile()
@@ -739,8 +746,10 @@ public class WindowManager {
     }
 
     // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
-    // When all managed windows vanish simultaneously, treat the pass as unreliable.
-    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty
+    // Only treat the pass as a mass disappearance when the scan itself returned no
+    // on-screen windows. If other windows are visible, managed windows being absent is
+    // genuine (closed/minimized) and should be reaped normally rather than suppressed.
+    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty && onScreenIDs.isEmpty
 
     let reapingAllowed: Bool
     if let deadline = reapSuppressedUntil, Date() < deadline {
@@ -874,6 +883,8 @@ public class WindowManager {
           if workspace.columns[colIdx].windows.count < before {
             changed = true
             membershipChanged = true
+            workspace.columns[colIdx].measuredMinWidth = nil
+            workspace.columns[colIdx].measuredMinHeight = nil
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -1350,7 +1361,9 @@ public class WindowManager {
   /// Replace a managed window's id in-place (for native-tab active-window changes).
   /// The new node keeps the old node's position within its column.
   private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
-    state.swapWindowID(from: oldID, to: newID, title: title)
+    if state.swapWindowID(from: oldID, to: newID, title: title) {
+      needsSave = true
+    }
   }
 
   private func removeWindow(windowID: CGWindowID) {
@@ -1372,6 +1385,8 @@ public class WindowManager {
             if column.focusedWindowIndex >= column.windows.count {
               column.focusedWindowIndex = column.windows.count - 1
             }
+            column.measuredMinWidth = nil
+            column.measuredMinHeight = nil
             workspace.columns[colIdx] = column
           }
 
@@ -1399,6 +1414,8 @@ public class WindowManager {
           if workspace.columns[colIdx].windows.count < before {
             changed = true
             for gk in removedKeys { appliedWindows.removeValue(forKey: gk) }
+            workspace.columns[colIdx].measuredMinWidth = nil
+            workspace.columns[colIdx].measuredMinHeight = nil
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -1564,7 +1581,6 @@ public class WindowManager {
   private func computeEnv() -> ReducerEnv {
     ReducerEnv(
       workspaceCount: workspaceCount,
-      defaultColumnWidth: layoutConfig.defaultColumnWidth,
       activeScreenID: activeScreenID(),
       orderedScreenIDs: orderedScreenIDs()
     )
