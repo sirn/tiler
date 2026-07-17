@@ -23,6 +23,7 @@ public class WindowManager {
   public var layoutConfig: LayoutConfig
   public var minWindowWidth: CGFloat
   public var minWindowHeight: CGFloat
+  public var focusColumnWrap: Bool
 
   public let windowStore = WindowStore()
   private var floatingWindows: [CGWindowID: pid_t] = [:]
@@ -106,6 +107,7 @@ public class WindowManager {
     self.layoutConfig = config.layout
     self.minWindowWidth = config.general.minWindowWidth
     self.minWindowHeight = config.general.minWindowHeight
+    self.focusColumnWrap = config.general.focusColumnWrap
     self.appRules = config.appRules
 
     self.eventBroker = eventBroker
@@ -429,6 +431,7 @@ public class WindowManager {
     self.layoutConfig = config.layout
     self.minWindowWidth = config.general.minWindowWidth
     self.minWindowHeight = config.general.minWindowHeight
+    self.focusColumnWrap = config.general.focusColumnWrap
 
     let oldCount = workspaceCount
     self.workspaceCount = max(1, config.workspaces.count)
@@ -1619,7 +1622,8 @@ public class WindowManager {
     ReducerEnv(
       workspaceCount: workspaceCount,
       activeScreenID: activeScreenID(),
-      orderedScreenIDs: orderedScreenIDs()
+      orderedScreenIDs: orderedScreenIDs(),
+      focusColumnWrap: focusColumnWrap
     )
   }
   private func runEffects(_ effects: [Effect]) {

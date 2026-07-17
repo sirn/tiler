@@ -43,16 +43,19 @@ public struct GeneralConfig: Codable {
   public var columnGaps: CGFloat
   public var minWindowWidth: CGFloat
   public var minWindowHeight: CGFloat
+  public var focusColumnWrap: Bool
 
   public init(
     outerGaps: CGFloat = 8, innerGaps: CGFloat = 6, columnGaps: CGFloat = 8,
-    minWindowWidth: CGFloat = 300, minWindowHeight: CGFloat = 250
+    minWindowWidth: CGFloat = 300, minWindowHeight: CGFloat = 250,
+    focusColumnWrap: Bool = false
   ) {
     self.outerGaps = outerGaps
     self.innerGaps = innerGaps
     self.columnGaps = columnGaps
     self.minWindowWidth = minWindowWidth
     self.minWindowHeight = minWindowHeight
+    self.focusColumnWrap = focusColumnWrap
   }
 
   enum CodingKeys: String, CodingKey {
@@ -61,6 +64,7 @@ public struct GeneralConfig: Codable {
     case columnGaps = "column_gaps"
     case minWindowWidth = "min_window_width"
     case minWindowHeight = "min_window_height"
+    case focusColumnWrap = "focus_column_wrap"
   }
 }
 

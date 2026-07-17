@@ -49,6 +49,9 @@ public class ConfigLoader {
       if let mwh = general["min_window_height"]?.double {
         config.general.minWindowHeight = max(0, CGFloat(mwh))
       }
+      if let fw = general["focus_column_wrap"]?.bool {
+        config.general.focusColumnWrap = fw
+      }
     }
 
     // [layout]

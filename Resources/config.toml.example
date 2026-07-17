@@ -10,6 +10,9 @@ outer_gaps = 8
 inner_gaps = 6
 # Gap between adjacent columns.
 column_gaps = 8
+# When true, focus_column_left/right wrap within the active screen instead
+# of crossing to the adjacent display.
+focus_column_wrap = false
 
 # Layout
 
