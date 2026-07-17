@@ -158,6 +158,52 @@ final class ViewportCalcTests: XCTestCase {
     }
   }
 
+  // MARK: - center-focused-column
+
+  // .always centres the focused column. 3x0.5 cols (each 500, gaps 8):
+  // col1.left=508, U=1000 -> offset = 508 - (1000-500)/2 = 258.
+  func testCenterAlwaysCentersFocusedColumn() {
+    let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, range) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .always)
+    XCTAssertEqual(offset, 258, accuracy: 1.0)
+    XCTAssertTrue(range.contains(1))
+    // Focused column is centred: equal left/right margin around it.
+    XCTAssertEqual(cols[1].left - offset, U - (cols[1].left - offset) - cols[1].width, accuracy: 1.0)
+  }
+
+  // .onOverflow centres only when the focused column is wider than the viewport.
+  // Single 1.5-fr column (width 1500 > U 1000) -> offset = 0 - (1000-1500)/2 = 250.
+  func testCenterOnOverflowCentersWideColumn() {
+    let ws = makeWorkspace(fractions: [1.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .onOverflow)
+    XCTAssertEqual(offset, 250, accuracy: 1.0)
+  }
+
+  // .onOverflow falls back to scroll-into-view when the focused column fits.
+  func testCenterOnOverflowFallsBackToFit() {
+    let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (onOverflow, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .onOverflow)
+    let (never, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .never)
+    XCTAssertEqual(onOffset: onOffset, never: never)  // placeholder, replaced below
+    XCTAssertEqual(onOverflow, never, accuracy: 0.01)
+  }
+
   // After widening col 0 to 0.7, content overflows more. The saved scroll offset
   // (516) is stale for the new geometry; resolveOffset recomputes to 716,
   // keeping col 2 visible (range=1..<3, any-part-visible) without exceeding maxScroll.

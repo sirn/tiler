@@ -1989,7 +1989,9 @@ public class WindowManager {
     for (screenID, var screenState) in state.screens {
       let wsID = screenState.activeWorkspaceID
       guard var workspace = screenState.workspaces[wsID] else { continue }
-      let context = LayoutContext(screen: screenState.info, gaps: gaps)
+      let context = LayoutContext(
+        screen: screenState.info, gaps: gaps,
+        centerFocusedColumn: layoutConfig.centerFocusedColumn)
       let output = LayoutResolver.resolve(workspace, context)
       workspace.scrollOffset = output.offset
       screenState.workspaces[wsID] = workspace

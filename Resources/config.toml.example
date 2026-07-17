@@ -16,6 +16,11 @@ column_gaps = 8
 [layout]
 # Width fraction for newly-created columns (0.0–1.0 of usable width).
 default_column_width = 0.5
+# When to scroll the viewport so the focused column is centred:
+#   "never"        scroll it fully into view (default)
+#   "on-overflow"  centre it only when it is wider than the viewport
+#   "always"       always centre the focused column
+center_focused_column = "never"
 
 # Workspaces
 
