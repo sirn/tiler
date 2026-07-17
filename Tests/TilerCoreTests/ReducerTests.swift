@@ -24,7 +24,7 @@ final class ReducerTests: XCTestCase {
   }
 
   func env(screenID: ScreenID = 1) -> ReducerEnv {
-    ReducerEnv(workspaceCount: 9, defaultColumnWidth: 0.5, activeScreenID: screenID)
+    ReducerEnv(workspaceCount: 9, activeScreenID: screenID)
   }
 
   func makeWindowNode(id: UInt32, pid: pid_t = 42, title: String = "win") -> WindowNode {
