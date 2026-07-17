@@ -43,17 +43,25 @@ public class AppObserver {
       kAXUIElementDestroyedNotification as CFString,
     ]
 
-    for notification in notifications {
-      let err = AXObserverAddNotification(
-        observer, AXUIElementCreateApplication(pid), notification, selfPtr)
-      if err != .success {
-        if criticalNotifications.contains(notification) {
-          tiler_log(
-            "Warning - critical notification \(notification) subscription failed for PID \(pid): \(err.rawValue)"
-          )
-        } else {
-          tiler_log(
-            "Warning - could not subscribe to \(notification) for PID \(pid): \(err.rawValue)")
+    // AXObserverAddNotification can block for seconds on an unresponsive app
+    // (Phoenix #114). Subscribe on a utility queue so a hung process can't freeze
+    // the main run loop; events arriving before subscription completes are
+    // recovered by the periodic CGWindowList reconcile. The run-loop source is
+    // attached below on the main thread so deinit can remove it deterministically.
+    AppObserver.subscriptionQueue.async { [weak self] in
+      guard self != nil else { return }
+      for notification in notifications {
+        let err = AXObserverAddNotification(
+          observer, AXUIElementCreateApplication(pid), notification, selfPtr)
+        if err != .success {
+          if criticalNotifications.contains(notification) {
+            tiler_log(
+              "Warning - critical notification \(notification) subscription failed for PID \(pid): \(err.rawValue)"
+            )
+          } else {
+            tiler_log(
+              "Warning - could not subscribe to \(notification) for PID \(pid): \(err.rawValue)")
+          }
         }
       }
     }
@@ -61,6 +69,11 @@ public class AppObserver {
     // Add observer to run loop
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
   }
+
+  // Concurrent utility queue: each app subscribes independently so one hung
+  // process can't stall subscription for the others.
+  private static let subscriptionQueue = DispatchQueue(
+    label: "co.cakework.Tiler.ax-subscription", qos: .utility, attributes: .concurrent)
 
   private var externalCallback: EventCallback?
 
