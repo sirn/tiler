@@ -14,13 +14,11 @@ public enum WindowFilter {
       return false
     }
 
-    // Check subrole - allow standard windows, dialogs, and unknown subroles
     var subrole: CFTypeRef?
     if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole)
       == .success,
       let subroleStr = subrole as? String
     {
-      // Reject known-non-tileable subroles
       switch subroleStr {
       case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
         return false
