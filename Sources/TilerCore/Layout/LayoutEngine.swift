@@ -17,7 +17,7 @@ public enum LayoutEngine {
 
   /// Compute frames for all windows in a workspace, given screen geometry and gaps.
   /// Returns a dictionary of windowID → frame in screen coordinates.
-  /// The `viewportOffset` shifts all columns horizontally to center the focused column.
+  /// The `viewportOffset` shifts all columns horizontally to bring the focused column into view.
   /// The `visibleRange` specifies which column indices are on-screen; others are placed off-screen.
   public static func layout(
     workspace: Workspace,
