@@ -84,7 +84,6 @@ public enum LayoutEngine {
       )
 
       guard isVisible else {
-        // Place off-screen with 1px on the correct screen edge so macOS honors the position
         for window in column.windows {
           result[window.id] = NSRect(
             x: hiddenX,
@@ -128,16 +127,13 @@ public enum LayoutEngine {
         let titleBarHeight: CGFloat = 22
         let focusIdx = min(column.focusedWindowIndex, column.windows.count - 1)
         let count = column.windows.count
-        // All windows share the same frame height: remaining space after accounting
-        // for title bars of non-active windows that peek out above each other.
         let windowHeight = max(1, colHeight - CGFloat(count - 1) * titleBarHeight)
+        let effectiveHeight = max(windowHeight, column.measuredMinHeight ?? 0)
 
         var displayOrder = column.windows
         let focused = displayOrder.remove(at: focusIdx)
         displayOrder.append(focused)
 
-        // Non-active windows: stacked behind, each offset by titleBarHeight so only
-        // the title bar peeks above the window below it.
         for i in 0..<displayOrder.count - 1 {
           let belowCount = (displayOrder.count - 1) - i
           let y = usableRect.minY + CGFloat(belowCount) * titleBarHeight
@@ -145,7 +141,7 @@ public enum LayoutEngine {
             x: columnX,
             y: round(y),
             width: colWidth,
-            height: round(windowHeight)
+            height: round(effectiveHeight)
           )
           result[displayOrder[i].id] = frame
           tiler_debug(
@@ -157,7 +153,7 @@ public enum LayoutEngine {
           x: columnX,
           y: usableRect.minY,
           width: colWidth,
-          height: round(windowHeight)
+          height: round(effectiveHeight)
         )
         result[focused.id] = activeFrame
         tiler_debug(

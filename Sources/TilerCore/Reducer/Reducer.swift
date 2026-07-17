@@ -179,6 +179,8 @@ enum Reducer {
           if col.focusedWindowIndex >= col.windows.count {
             col.focusedWindowIndex = col.windows.count - 1
           }
+          col.measuredMinWidth = nil
+          col.measuredMinHeight = nil
           sourceWorkspace.columns[colIdx] = col
         }
         screenState.workspaces[currentWSID] = sourceWorkspace
@@ -330,6 +332,8 @@ enum Reducer {
         if col.focusedWindowIndex >= col.windows.count {
           col.focusedWindowIndex = col.windows.count - 1
         }
+        col.measuredMinWidth = nil
+        col.measuredMinHeight = nil
         sourceWorkspace.columns[colIdx] = col
       }
       screenState.workspaces[currentWSID] = sourceWorkspace
