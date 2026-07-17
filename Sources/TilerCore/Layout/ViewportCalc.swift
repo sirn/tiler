@@ -9,7 +9,9 @@ public enum ViewportCalc {
   /// Resolve viewport offset by scrolling the focused column fully into view.
   /// The anchor (persisted scrollOffset) is clamped, then corrected so that:
   ///   focused.left >= offset && focused.right <= offset + U
-  /// Clamped to [0, maxScroll]. Offset is rounded to integer for pixel alignment.
+  /// Clamped to [0, maxScroll] for .never/.onOverflow. .always centres the focused
+  /// column and may offset outside [0, maxScroll] (blank space at the strip edges,
+  /// Niri parity). Offset is rounded to integer for pixel alignment.
   ///
   /// - Returns: (offset, visibleRange) where visibleRange contains columns with any part overlapping the viewport.
   static func resolveOffset(
@@ -19,11 +21,21 @@ public enum ViewportCalc {
     guard !strip.isEmpty else { return (0, 0..<0) }
     let f = min(focused, strip.count - 1)
     let maxScroll = max(0, LayoutGeometry.contentWidth(strip) - U)
+
+    // .always centres the focused column even when that leaves blank space at the
+    // strip edges (Niri parity), so it bypasses the overflow guard and the
+    // [0, maxScroll] clamp the other modes use to keep content flush.
+    if centerMode == .always {
+      let s = strip[f].left - (U - strip[f].width) / 2
+      let offset = round(s)
+      return (offset, visibleAtOffset(strip, offset, U))
+    }
+
     guard maxScroll > leftEpsilon else { return (0, 0..<strip.count) }
     var s = min(max(anchor, 0), maxScroll)
     switch centerMode {
     case .always:
-      s = strip[f].left - (U - strip[f].width) / 2
+      break
     case .onOverflow:
       // Centre only when the focused column itself doesn't fit the viewport;
       // otherwise scroll it fully into view.

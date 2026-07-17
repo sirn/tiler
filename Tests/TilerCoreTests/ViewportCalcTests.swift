@@ -189,6 +189,37 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertEqual(offset, 250, accuracy: 1.0)
   }
 
+  // .always centres the first column even though that needs a negative offset
+  // (col0.left=0, width=500, U=1000 -> offset = 0 - (1000-500)/2 = -250).
+  // The [0, maxScroll] clamp must NOT pin edge columns when centering.
+  func testCenterAlwaysCentersFirstColumnWithNegativeOffset() {
+    let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, range) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .always)
+    XCTAssertEqual(offset, -250, accuracy: 1.0)
+    XCTAssertTrue(range.contains(0))
+    // Focused column centred: left margin == right margin.
+    XCTAssertEqual(cols[0].left - offset, U - (cols[0].left - offset) - cols[0].width, accuracy: 1.0)
+  }
+
+  // .always centres even when all content fits the viewport (maxScroll ~= 0),
+  // where the overflow guard would otherwise early-return offset 0.
+  func testCenterAlwaysCentersWhenContentFits() {
+    let ws = makeWorkspace(fractions: [0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, range) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U, centerMode: .always)
+    XCTAssertEqual(offset, cols[0].left - (U - cols[0].width) / 2, accuracy: 1.0)
+    XCTAssertEqual(range, 0..<1)
+  }
+
   // .onOverflow falls back to scroll-into-view when the focused column fits.
   func testCenterOnOverflowFallsBackToFit() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
