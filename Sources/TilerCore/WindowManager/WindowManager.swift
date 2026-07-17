@@ -408,7 +408,7 @@ public class WindowManager {
     workspace.focusedColumnIndex =
       restoredColumns.isEmpty
       ? 0
-      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+      : min(max(persistedWS.focusedColumnIndex, 0), restoredColumns.count - 1)
   }
 
   // MARK: - Config
@@ -422,6 +422,8 @@ public class WindowManager {
       columnGaps: config.general.columnGaps
     )
     self.layoutConfig = config.layout
+    self.minWindowWidth = config.general.minWindowWidth
+    self.minWindowHeight = config.general.minWindowHeight
 
     let oldCount = workspaceCount
     self.workspaceCount = max(1, config.workspaces.count)
@@ -739,8 +741,10 @@ public class WindowManager {
     }
 
     // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
-    // When all managed windows vanish simultaneously, treat the pass as unreliable.
-    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty
+    // Only treat the pass as a mass disappearance when the scan itself returned no
+    // on-screen windows. If other windows are visible, managed windows being absent is
+    // genuine (closed/minimized) and should be reaped normally rather than suppressed.
+    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty && onScreenIDs.isEmpty
 
     let reapingAllowed: Bool
     if let deadline = reapSuppressedUntil, Date() < deadline {
