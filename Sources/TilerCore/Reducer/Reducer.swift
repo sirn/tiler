@@ -228,139 +228,10 @@ enum Reducer {
       return []
 
     case .moveToScreenPrevious:
-      guard let screenID = env.activeScreenID,
-        let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
-        env.orderedScreenIDs.count > 1
-      else { return [] }
-      let targetID = env.orderedScreenIDs[
-        (currentIdx - 1 + env.orderedScreenIDs.count) % env.orderedScreenIDs.count]
-
-      var extractedWindow: WindowNode?
-      var extractedWidthFraction: CGFloat = 0.5
-      let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
-        let currentWSID = screenState.activeWorkspaceID
-        guard var sourceWorkspace = screenState.workspaces[currentWSID],
-          !sourceWorkspace.columns.isEmpty
-        else { return [] }
-        let colIdx = sourceWorkspace.focusedColumnIndex
-        guard colIdx < sourceWorkspace.columns.count else { return [] }
-        var col = sourceWorkspace.columns[colIdx]
-        let winIdx = col.focusedWindowIndex
-        guard winIdx < col.windows.count else { return [] }
-
-        let window = col.windows.remove(at: winIdx)
-        extractedWindow = window
-        extractedWidthFraction = col.widthFraction
-
-        if col.windows.isEmpty {
-          sourceWorkspace.columns.remove(at: colIdx)
-          if sourceWorkspace.focusedColumnIndex >= sourceWorkspace.columns.count
-            && !sourceWorkspace.columns.isEmpty
-          {
-            sourceWorkspace.focusedColumnIndex = sourceWorkspace.columns.count - 1
-          }
-        } else {
-          if col.focusedWindowIndex >= col.windows.count {
-            col.focusedWindowIndex = col.windows.count - 1
-          }
-          sourceWorkspace.columns[colIdx] = col
-        }
-        screenState.workspaces[currentWSID] = sourceWorkspace
-        return [.retile]
-      }
-
-      guard let window = extractedWindow else { return sourceEffects }
-
-      let targetEffects = state.withScreen(targetID) { targetID, targetScreen in
-        let targetWSID = targetScreen.activeWorkspaceID
-        guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }
-
-        let newCol = Column(
-          windows: [window], focusedWindowIndex: 0, widthFraction: extractedWidthFraction)
-        if targetWorkspace.columns.isEmpty {
-          targetWorkspace.columns = [newCol]
-          targetWorkspace.focusedColumnIndex = 0
-        } else {
-          let insertAt = min(targetWorkspace.focusedColumnIndex + 1, targetWorkspace.columns.count)
-          targetWorkspace.columns.insert(newCol, at: insertAt)
-          targetWorkspace.focusedColumnIndex = insertAt
-        }
-        targetScreen.workspaces[targetWSID] = targetWorkspace
-
-        return [
-          .retile, .focusFocusedWindow(targetID, targetWSID),
-          .log("Moved window to screen \(targetID)"),
-        ]
-      }
-
-      return sourceEffects + targetEffects
+      return moveFocusedWindowToAdjacentScreen(offset: -1, to: &state, env: env)
 
     case .moveToScreenNext:
-      guard let screenID = env.activeScreenID,
-        let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
-        env.orderedScreenIDs.count > 1
-      else { return [] }
-      let targetID = env.orderedScreenIDs[(currentIdx + 1) % env.orderedScreenIDs.count]
-
-      var extractedWindow: WindowNode?
-      var extractedWidthFraction: CGFloat = 0.5
-      let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
-        let currentWSID = screenState.activeWorkspaceID
-        guard var sourceWorkspace = screenState.workspaces[currentWSID],
-          !sourceWorkspace.columns.isEmpty
-        else { return [] }
-        let colIdx = sourceWorkspace.focusedColumnIndex
-        guard colIdx < sourceWorkspace.columns.count else { return [] }
-        var col = sourceWorkspace.columns[colIdx]
-        let winIdx = col.focusedWindowIndex
-        guard winIdx < col.windows.count else { return [] }
-
-        let window = col.windows.remove(at: winIdx)
-        extractedWindow = window
-        extractedWidthFraction = col.widthFraction
-
-        if col.windows.isEmpty {
-          sourceWorkspace.columns.remove(at: colIdx)
-          if sourceWorkspace.focusedColumnIndex >= sourceWorkspace.columns.count
-            && !sourceWorkspace.columns.isEmpty
-          {
-            sourceWorkspace.focusedColumnIndex = sourceWorkspace.columns.count - 1
-          }
-        } else {
-          if col.focusedWindowIndex >= col.windows.count {
-            col.focusedWindowIndex = col.windows.count - 1
-          }
-          sourceWorkspace.columns[colIdx] = col
-        }
-        screenState.workspaces[currentWSID] = sourceWorkspace
-        return [.retile]
-      }
-
-      guard let window = extractedWindow else { return sourceEffects }
-
-      let targetEffects = state.withScreen(targetID) { targetID, targetScreen in
-        let targetWSID = targetScreen.activeWorkspaceID
-        guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }
-
-        let newCol = Column(
-          windows: [window], focusedWindowIndex: 0, widthFraction: extractedWidthFraction)
-        if targetWorkspace.columns.isEmpty {
-          targetWorkspace.columns = [newCol]
-          targetWorkspace.focusedColumnIndex = 0
-        } else {
-          let insertAt = min(targetWorkspace.focusedColumnIndex + 1, targetWorkspace.columns.count)
-          targetWorkspace.columns.insert(newCol, at: insertAt)
-          targetWorkspace.focusedColumnIndex = insertAt
-        }
-        targetScreen.workspaces[targetWSID] = targetWorkspace
-
-        return [
-          .retile, .focusFocusedWindow(targetID, targetWSID),
-          .log("Moved window to screen \(targetID)"),
-        ]
-      }
-
-      return sourceEffects + targetEffects
+      return moveFocusedWindowToAdjacentScreen(offset: 1, to: &state, env: env)
 
     case .increaseColumnWidth:
       return state.withFocusedColumn(env: env) { _, _, col in
@@ -417,5 +288,78 @@ enum Reducer {
         .raiseTabbedWindows(screenID, wsID), .focusFocusedWindow(screenID, wsID), .retile,
       ]
     }
+  }
+
+  // `offset` is -1 for previous and +1 for next; the modulo wraps the ordered screen
+  // list so source extraction and target insertion stay identical across both directions.
+  private static func moveFocusedWindowToAdjacentScreen(
+    offset: Int, to state: inout TilerState, env: ReducerEnv
+  ) -> [Effect] {
+    guard let screenID = env.activeScreenID,
+      let currentIdx = env.orderedScreenIDs.firstIndex(of: screenID),
+      env.orderedScreenIDs.count > 1
+    else { return [] }
+    let count = env.orderedScreenIDs.count
+    let targetID = env.orderedScreenIDs[(currentIdx + offset + count) % count]
+
+    var extractedWindow: WindowNode?
+    var extractedWidthFraction: CGFloat = 0.5
+    let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
+      let currentWSID = screenState.activeWorkspaceID
+      guard var sourceWorkspace = screenState.workspaces[currentWSID],
+        !sourceWorkspace.columns.isEmpty
+      else { return [] }
+      let colIdx = sourceWorkspace.focusedColumnIndex
+      guard colIdx < sourceWorkspace.columns.count else { return [] }
+      var col = sourceWorkspace.columns[colIdx]
+      let winIdx = col.focusedWindowIndex
+      guard winIdx < col.windows.count else { return [] }
+
+      let window = col.windows.remove(at: winIdx)
+      extractedWindow = window
+      extractedWidthFraction = col.widthFraction
+
+      if col.windows.isEmpty {
+        sourceWorkspace.columns.remove(at: colIdx)
+        if sourceWorkspace.focusedColumnIndex >= sourceWorkspace.columns.count
+          && !sourceWorkspace.columns.isEmpty
+        {
+          sourceWorkspace.focusedColumnIndex = sourceWorkspace.columns.count - 1
+        }
+      } else {
+        if col.focusedWindowIndex >= col.windows.count {
+          col.focusedWindowIndex = col.windows.count - 1
+        }
+        sourceWorkspace.columns[colIdx] = col
+      }
+      screenState.workspaces[currentWSID] = sourceWorkspace
+      return [.retile]
+    }
+
+    guard let window = extractedWindow else { return sourceEffects }
+
+    let targetEffects = state.withScreen(targetID) { targetID, targetScreen in
+      let targetWSID = targetScreen.activeWorkspaceID
+      guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }
+
+      let newCol = Column(
+        windows: [window], focusedWindowIndex: 0, widthFraction: extractedWidthFraction)
+      if targetWorkspace.columns.isEmpty {
+        targetWorkspace.columns = [newCol]
+        targetWorkspace.focusedColumnIndex = 0
+      } else {
+        let insertAt = min(targetWorkspace.focusedColumnIndex + 1, targetWorkspace.columns.count)
+        targetWorkspace.columns.insert(newCol, at: insertAt)
+        targetWorkspace.focusedColumnIndex = insertAt
+      }
+      targetScreen.workspaces[targetWSID] = targetWorkspace
+
+      return [
+        .retile, .focusFocusedWindow(targetID, targetWSID),
+        .log("Moved window to screen \(targetID)"),
+      ]
+    }
+
+    return sourceEffects + targetEffects
   }
 }
