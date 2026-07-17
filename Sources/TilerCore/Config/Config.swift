@@ -66,16 +66,33 @@ public struct GeneralConfig: Codable {
 
 // MARK: - Layout
 
+/// When to scroll the viewport so the focused column is centred.
+/// Mirrors Niri's `center-focused-column` option.
+public enum CenterFocusedColumn: String, Codable {
+  /// Scroll the focused column fully into view but never centre it.
+  case never
+  /// Centre the focused column only when it is wider than the viewport.
+  case onOverflow = "on-overflow"
+  /// Always centre the focused column.
+  case always
+}
+
 /// [layout] section — default column behaviour.
 public struct LayoutConfig: Codable {
   public var defaultColumnWidth: CGFloat
+  public var centerFocusedColumn: CenterFocusedColumn
 
-  public init(defaultColumnWidth: CGFloat = 0.5) {
+  public init(
+    defaultColumnWidth: CGFloat = 0.5,
+    centerFocusedColumn: CenterFocusedColumn = .never
+  ) {
     self.defaultColumnWidth = defaultColumnWidth
+    self.centerFocusedColumn = centerFocusedColumn
   }
 
   enum CodingKeys: String, CodingKey {
     case defaultColumnWidth = "default_column_width"
+    case centerFocusedColumn = "center_focused_column"
   }
 }
 

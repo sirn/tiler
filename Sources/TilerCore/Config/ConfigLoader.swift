@@ -56,6 +56,11 @@ public class ConfigLoader {
       if let dcw = layout["default_column_width"]?.double {
         config.layout.defaultColumnWidth = min(max(CGFloat(dcw), 0.1), 1.0)
       }
+      if let cfc = layout["center_focused_column"]?.string,
+        let mode = CenterFocusedColumn(rawValue: cfc)
+      {
+        config.layout.centerFocusedColumn = mode
+      }
 
     }
 

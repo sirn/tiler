@@ -4,10 +4,15 @@ import Foundation
 public struct LayoutContext {
   public let screen: ScreenInfo
   public let gaps: GapConfig
+  public let centerFocusedColumn: CenterFocusedColumn
 
-  public init(screen: ScreenInfo, gaps: GapConfig) {
+  public init(
+    screen: ScreenInfo, gaps: GapConfig,
+    centerFocusedColumn: CenterFocusedColumn = .never
+  ) {
     self.screen = screen
     self.gaps = gaps
+    self.centerFocusedColumn = centerFocusedColumn
   }
 }
 
@@ -31,7 +36,8 @@ public enum LayoutResolver {
       anchor: workspace.scrollOffset,
       focused: workspace.focusedColumnIndex,
       strip: cols,
-      U: U
+      U: U,
+      centerMode: context.centerFocusedColumn
     )
     let frames = LayoutEngine.layout(
       workspace: workspace,

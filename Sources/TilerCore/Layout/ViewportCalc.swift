@@ -13,15 +13,30 @@ public enum ViewportCalc {
   ///
   /// - Returns: (offset, visibleRange) where visibleRange contains columns with any part overlapping the viewport.
   static func resolveOffset(
-    anchor: CGFloat, focused: Int, strip: [ColumnLayout], U: CGFloat
+    anchor: CGFloat, focused: Int, strip: [ColumnLayout], U: CGFloat,
+    centerMode: CenterFocusedColumn = .never
   ) -> (offset: CGFloat, visibleRange: Range<Int>) {
     guard !strip.isEmpty else { return (0, 0..<0) }
     let f = min(focused, strip.count - 1)
     let maxScroll = max(0, LayoutGeometry.contentWidth(strip) - U)
     guard maxScroll > leftEpsilon else { return (0, 0..<strip.count) }
     var s = min(max(anchor, 0), maxScroll)
-    if strip[f].left < s { s = strip[f].left }
-    if strip[f].right > s + U { s = strip[f].right - U }
+    switch centerMode {
+    case .always:
+      s = strip[f].left - (U - strip[f].width) / 2
+    case .onOverflow:
+      // Centre only when the focused column itself doesn't fit the viewport;
+      // otherwise scroll it fully into view.
+      if strip[f].width > U - leftEpsilon {
+        s = strip[f].left - (U - strip[f].width) / 2
+      } else {
+        if strip[f].left < s { s = strip[f].left }
+        if strip[f].right > s + U { s = strip[f].right - U }
+      }
+    case .never:
+      if strip[f].left < s { s = strip[f].left }
+      if strip[f].right > s + U { s = strip[f].right - U }
+    }
     // Round to integer for pixel-perfect alignment with LayoutEngine
     let offset = round(clampToEdge(min(max(s, 0), maxScroll), maxScroll))
     let visible = visibleAtOffset(strip, offset, U)
