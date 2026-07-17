@@ -17,7 +17,7 @@ public enum LayoutEngine {
 
   /// Compute frames for all windows in a workspace, given screen geometry and gaps.
   /// Returns a dictionary of windowID → frame in screen coordinates.
-  /// The `viewportOffset` shifts all columns horizontally to center the focused column.
+  /// The `viewportOffset` shifts all columns horizontally to bring the focused column into view.
   /// The `visibleRange` specifies which column indices are on-screen; others are placed off-screen.
   public static func layout(
     workspace: Workspace,
@@ -33,7 +33,6 @@ public enum LayoutEngine {
     let visibleFrame = screen.visibleFrame
     let og = gaps.outerGaps
 
-    // Usable area after outer gaps
     let usableRect = NSRect(
       x: visibleFrame.minX + og,
       y: visibleFrame.minY + og,
@@ -43,7 +42,6 @@ public enum LayoutEngine {
 
     let cols = LayoutGeometry.columns(workspace, screen, gaps)
 
-    // Debug logging
     tiler_debug(
       "[LayoutEngine] layout: \(workspace.columns.count) columns, viewportOffset=\(String(format: "%.1f", viewportOffset)), visibleRange=\(visibleRange)"
     )
@@ -62,14 +60,12 @@ public enum LayoutEngine {
     let screenMinX = visibleFrame.minX
     let screenMaxX = visibleFrame.maxX
 
-    // Round viewportOffset to integer for pixel-perfect alignment
     let roundedOffset = round(viewportOffset)
     for (colIndex, column) in workspace.columns.enumerated() {
       let isVisible = visibleRange.contains(colIndex)
       let colGeom = cols[colIndex]
       let colWidth = colGeom.width
       let colHeight = usableRect.height
-      // Column X in screen coordinates: usableRect.minX - viewportOffset + column's left edge
       let columnX = round(usableRect.minX - roundedOffset + colGeom.left)
       let onScreen = isVisible
 
@@ -83,13 +79,11 @@ public enum LayoutEngine {
       let offLeft = colGeom.left < roundedOffset
       let hiddenX = round(offLeft ? (screenMinX - colWidth + 1) : (screenMaxX - 1))
 
-      // Per-column logging
       tiler_debug(
         "[LayoutEngine]   col[\(colIndex)] x=\(String(format: "%.1f", columnX)) width=\(String(format: "%.1f", colWidth)) visible=\(isVisible) onScreen=\(onScreen)"
       )
 
       guard isVisible else {
-        // Place off-screen with 1px on the correct screen edge so macOS honors the position
         for window in column.windows {
           result[window.id] = NSRect(
             x: hiddenX,
@@ -133,26 +127,21 @@ public enum LayoutEngine {
         let titleBarHeight: CGFloat = 22
         let focusIdx = min(column.focusedWindowIndex, column.windows.count - 1)
         let count = column.windows.count
-        // All windows share the same frame height: remaining space after accounting
-        // for title bars of non-active windows that peek out above each other.
         let windowHeight = max(1, colHeight - CGFloat(count - 1) * titleBarHeight)
+        let effectiveHeight = max(windowHeight, column.measuredMinHeight ?? 0)
 
-        // Build display order: non-active windows first, active window last.
         var displayOrder = column.windows
         let focused = displayOrder.remove(at: focusIdx)
         displayOrder.append(focused)
 
-        // Non-active windows: stacked behind, each offset by titleBarHeight so only
-        // the title bar peeks above the window below it.
         for i in 0..<displayOrder.count - 1 {
-          // Number of windows below this one in the visual stack.
           let belowCount = (displayOrder.count - 1) - i
           let y = usableRect.minY + CGFloat(belowCount) * titleBarHeight
           let frame = NSRect(
             x: columnX,
             y: round(y),
             width: colWidth,
-            height: round(windowHeight)
+            height: round(effectiveHeight)
           )
           result[displayOrder[i].id] = frame
           tiler_debug(
@@ -160,12 +149,11 @@ public enum LayoutEngine {
           )
         }
 
-        // Active window: at the bottom, fully visible.
         let activeFrame = NSRect(
           x: columnX,
           y: usableRect.minY,
           width: colWidth,
-          height: round(windowHeight)
+          height: round(effectiveHeight)
         )
         result[focused.id] = activeFrame
         tiler_debug(

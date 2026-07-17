@@ -25,7 +25,7 @@ public class WindowManager {
   public var minWindowHeight: CGFloat
 
   public let windowStore = WindowStore()
-  private var floatingWindows: Set<CGWindowID> = []
+  private var floatingWindows: [CGWindowID: pid_t] = [:]
   private var appRules: [AppRuleConfig] = []
 
   /// Fired whenever the menu bar indicator state (occupied workspaces or current) changes.
@@ -97,7 +97,7 @@ public class WindowManager {
       innerGaps: config.general.innerGaps,
       columnGaps: config.general.columnGaps
     )
-    self.workspaceCount = config.workspaces.count
+    self.workspaceCount = max(1, config.workspaces.count)
     self.layoutConfig = config.layout
     self.minWindowWidth = config.general.minWindowWidth
     self.minWindowHeight = config.general.minWindowHeight
@@ -408,7 +408,7 @@ public class WindowManager {
     workspace.focusedColumnIndex =
       restoredColumns.isEmpty
       ? 0
-      : min(persistedWS.focusedColumnIndex, restoredColumns.count - 1)
+      : min(max(persistedWS.focusedColumnIndex, 0), restoredColumns.count - 1)
   }
 
   // MARK: - Config
@@ -422,6 +422,8 @@ public class WindowManager {
       columnGaps: config.general.columnGaps
     )
     self.layoutConfig = config.layout
+    self.minWindowWidth = config.general.minWindowWidth
+    self.minWindowHeight = config.general.minWindowHeight
 
     let oldCount = workspaceCount
     self.workspaceCount = max(1, config.workspaces.count)
@@ -450,6 +452,8 @@ public class WindowManager {
                   target.focusedColumnIndex = 0
                 } else {
                   target.columns[target.focusedColumnIndex].windows.append(window)
+                  target.columns[target.focusedColumnIndex].measuredMinWidth = nil
+                  target.columns[target.focusedColumnIndex].measuredMinHeight = nil
                 }
               }
             }
@@ -493,19 +497,23 @@ public class WindowManager {
     case .appActivated(let pid):
       syncFocusFromActivatedApp(pid: pid)
     case .appTerminated(let pid):
-      // Prune floating windows before windowStore forgets the pid
-      floatingWindows = floatingWindows.filter { wid in
-        guard let element = windowStore.element(for: wid) else { return false }
-        var elementPid: pid_t = 0
-        AXUIElementGetPid(element, &elementPid)
-        return elementPid != pid
+      // Prune floating windows belonging to the terminated pid only
+      for wid in floatingWindows.keys where floatingWindows[wid] == pid {
+        floatingWindows.removeValue(forKey: wid)
       }
       windowStore.forget(pid: pid)
-      removeWindowsForPID(pid)
+      if removeWindowsForPID(pid) {
+        needsSave = true
+      }
       setNeedsRetile()
     case .windowCreated:
       setNeedsReconcile()
-    case .windowDestroyed:
+    case .windowDestroyed(let element):
+      let destroyedWID =
+        windowStore.windowID(for: element) ?? windowStore.windowIDByIdentity(for: element)
+      if let destroyedWID = destroyedWID {
+        floatingWindows.removeValue(forKey: destroyedWID)
+      }
       setNeedsReconcile()
     case .windowMinimized:
       setNeedsReconcile()
@@ -515,7 +523,7 @@ public class WindowManager {
       handleFocusChanged(pid: pid, element: element)
     case .geometryChanged(_, let element):
       guard let wid = windowStore.windowID(for: element) else { return }
-      if floatingWindows.contains(wid) { return }
+      if floatingWindows[wid] != nil { return }
 
       let decision: EchoDecision
       if let observed = AXWindowBridge.currentFrame(for: element) {
@@ -731,6 +739,9 @@ public class WindowManager {
       noElementCandidates.remove(wid)
       if WindowFilter.isTileable(element) {
         tileableIDs.insert(wid)
+        if managedIDs.contains(wid) {
+          stillAlive.insert(wid)
+        }
         tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
       } else {
         notTileableCandidates.insert(wid)
@@ -739,8 +750,10 @@ public class WindowManager {
     }
 
     // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
-    // When all managed windows vanish simultaneously, treat the pass as unreliable.
-    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty
+    // Only treat the pass as a mass disappearance when the scan itself returned no
+    // on-screen windows. If other windows are visible, managed windows being absent is
+    // genuine (closed/minimized) and should be reaped normally rather than suppressed.
+    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty && onScreenIDs.isEmpty
 
     let reapingAllowed: Bool
     if let deadline = reapSuppressedUntil, Date() < deadline {
@@ -874,6 +887,8 @@ public class WindowManager {
           if workspace.columns[colIdx].windows.count < before {
             changed = true
             membershipChanged = true
+            workspace.columns[colIdx].measuredMinWidth = nil
+            workspace.columns[colIdx].measuredMinHeight = nil
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -969,11 +984,11 @@ public class WindowManager {
     // Add new windows
     for wid in adjustedToAdd {
       guard let (pid, title, bounds) = windowInfo[wid] else { continue }
-      if floatingWindows.contains(wid) {
+      if floatingWindows[wid] != nil {
         continue  // manual toggle or app-rule float — persists
       }
       if appRuleFloat(pid: pid) {
-        floatingWindows.insert(wid)  // first sight of an app-rule float
+        floatingWindows[wid] = pid  // first sight of an app-rule float
         tiler_debug("reconcile: float (app-rule) wid=\(wid) pid=\(pid) title='\(title)'")
         continue
       }
@@ -1054,18 +1069,24 @@ public class WindowManager {
         pendingFocus = nil
         pendingFocusAttempts = 0
       } else {
-        pendingFocusAttempts += 1
-        if pendingFocusAttempts >= 8 {
-          tiler_log(
-            "pendingFocus: giving up after \(pendingFocusAttempts) attempts wid=\(replayWid.map { "\($0)" } ?? "nil")"
-          )
-          pendingFocus = nil
-          pendingFocusAttempts = 0
-        } else {
-          tiler_debug(
-            "pendingFocus: not yet tiled, attempt \(pendingFocusAttempts)/8 wid=\(replayWid.map { "\($0)" } ?? "nil")"
-          )
-          setNeedsReconcile()
+        // While the target is still in its open-animation settling window,
+        // updateFocus cannot succeed and the settle recheck will reschedule
+        // reconcile, so neither burn the retry budget nor spin the main queue.
+        let settling = replayWid.map { settlingWindows[$0] != nil } ?? false
+        if !settling {
+          pendingFocusAttempts += 1
+          if pendingFocusAttempts >= 8 {
+            tiler_log(
+              "pendingFocus: giving up after \(pendingFocusAttempts) attempts wid=\(replayWid.map { "\($0)" } ?? "nil")"
+            )
+            pendingFocus = nil
+            pendingFocusAttempts = 0
+          } else {
+            tiler_debug(
+              "pendingFocus: not yet tiled, attempt \(pendingFocusAttempts)/8 wid=\(replayWid.map { "\($0)" } ?? "nil")"
+            )
+            setNeedsReconcile()
+          }
         }
       }
     }
@@ -1123,7 +1144,7 @@ public class WindowManager {
     }
 
     // Floating windows are not managed by the tiler
-    if floatingWindows.contains(wid) {
+    if floatingWindows[wid] != nil {
       return
     }
 
@@ -1181,7 +1202,7 @@ public class WindowManager {
       }
       return
     }
-    if floatingWindows.contains(wid) {
+    if floatingWindows[wid] != nil {
       return
     }
     if updateFocus(windowID: wid) {
@@ -1231,7 +1252,10 @@ public class WindowManager {
     if let focusedID = focusedScreenID, state.screens[focusedID] != nil {
       return focusedID
     }
-    let mid = NSPoint(x: bounds.midX, y: bounds.midY)
+    // bounds are CG top-left origin; visibleFrame is Cocoa bottom-left, so flip Y
+    // before containment or vertically arranged displays misresolve.
+    let screenHeight = AXWindowBridge.primaryScreenHeight()
+    let mid = NSPoint(x: bounds.midX, y: screenHeight - bounds.midY)
     for (id, ss) in state.screens where ss.info.visibleFrame.contains(mid) {
       return id
     }
@@ -1287,6 +1311,8 @@ public class WindowManager {
           AXWindowBridge.framesMatch(cocoaBounds, existingFrame, tolerance: 10)
         {
           workspace.columns[focusedIdx].windows.append(node)
+          workspace.columns[focusedIdx].measuredMinWidth = nil
+          workspace.columns[focusedIdx].measuredMinHeight = nil
           if workspace.columns[focusedIdx].mode == .stack {
             workspace.columns[focusedIdx].mode = .tab
           }
@@ -1313,6 +1339,8 @@ public class WindowManager {
         AXWindowBridge.framesMatch(cocoaBounds, existingFrame, tolerance: 10)
       {
         workspace.columns[idx].windows.append(node)
+        workspace.columns[idx].measuredMinWidth = nil
+        workspace.columns[idx].measuredMinHeight = nil
         if workspace.columns[idx].mode == .stack { workspace.columns[idx].mode = .tab }
         screenState.workspaces[wsID] = workspace
         state.screens[screenID] = screenState
@@ -1350,7 +1378,9 @@ public class WindowManager {
   /// Replace a managed window's id in-place (for native-tab active-window changes).
   /// The new node keeps the old node's position within its column.
   private func swapWindowID(from oldID: CGWindowID, to newID: CGWindowID, title: String) {
-    state.swapWindowID(from: oldID, to: newID, title: title)
+    if state.swapWindowID(from: oldID, to: newID, title: title) {
+      needsSave = true
+    }
   }
 
   private func removeWindow(windowID: CGWindowID) {
@@ -1372,6 +1402,8 @@ public class WindowManager {
             if column.focusedWindowIndex >= column.windows.count {
               column.focusedWindowIndex = column.windows.count - 1
             }
+            column.measuredMinWidth = nil
+            column.measuredMinHeight = nil
             workspace.columns[colIdx] = column
           }
 
@@ -1385,7 +1417,9 @@ public class WindowManager {
     }
   }
 
-  private func removeWindowsForPID(_ pid: pid_t) {
+  @discardableResult
+  private func removeWindowsForPID(_ pid: pid_t) -> Bool {
+    var anyChanged = false
     for (screenID, var screenState) in state.screens {
       var screenChanged = false
       for (wsID, var workspace) in screenState.workspaces {
@@ -1399,6 +1433,8 @@ public class WindowManager {
           if workspace.columns[colIdx].windows.count < before {
             changed = true
             for gk in removedKeys { appliedWindows.removeValue(forKey: gk) }
+            workspace.columns[colIdx].measuredMinWidth = nil
+            workspace.columns[colIdx].measuredMinHeight = nil
           }
           if workspace.columns[colIdx].windows.isEmpty {
             workspace.columns.remove(at: colIdx)
@@ -1421,8 +1457,10 @@ public class WindowManager {
       }
       if screenChanged {
         state.screens[screenID] = screenState
+        anyChanged = true
       }
     }
+    return anyChanged
   }
 
   @discardableResult
@@ -1532,9 +1570,9 @@ public class WindowManager {
       }
     }
 
-    if let wid = axWID, floatingWindows.contains(wid) {
+    if let wid = axWID, floatingWindows[wid] != nil {
       // Un-float: remove from floating set and let reconcile re-tile it
-      floatingWindows.remove(wid)
+      floatingWindows.removeValue(forKey: wid)
       setNeedsReconcile()
       needsSave = true
       tiler_log("Un-floated window wid=\(wid)")
@@ -1547,13 +1585,13 @@ public class WindowManager {
       return
     }
 
-    if floatingWindows.contains(window.id) {
-      floatingWindows.remove(window.id)
+    if floatingWindows[window.id] != nil {
+      floatingWindows.removeValue(forKey: window.id)
       setNeedsReconcile()
       needsSave = true
       tiler_log("Un-floated window wid=\(window.id)")
     } else {
-      floatingWindows.insert(window.id)
+      floatingWindows[window.id] = window.pid
       removeWindow(windowID: window.id)
       setNeedsRetile()
       needsSave = true
@@ -1564,7 +1602,6 @@ public class WindowManager {
   private func computeEnv() -> ReducerEnv {
     ReducerEnv(
       workspaceCount: workspaceCount,
-      defaultColumnWidth: layoutConfig.defaultColumnWidth,
       activeScreenID: activeScreenID(),
       orderedScreenIDs: orderedScreenIDs()
     )
