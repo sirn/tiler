@@ -54,7 +54,6 @@ public enum WindowFilter {
       return false
     }
 
-    // Check minimized
     var minimized: CFTypeRef?
     if AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &minimized)
       == .success,
@@ -63,7 +62,6 @@ public enum WindowFilter {
       return false
     }
 
-    // Check fullscreen
     var fullScreen: CFTypeRef?
     if AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullScreen) == .success,
       let fullScreenBool = fullScreen as? Bool, fullScreenBool
@@ -71,16 +69,11 @@ public enum WindowFilter {
       return false
     }
 
-    // Get PID from the element's parent app
     var pid: pid_t = 0
-    AXUIElementGetPid(element, &pid)
-
-    // Check that the app is a regular app
-    if let app = NSRunningApplication(processIdentifier: pid) {
-      guard app.activationPolicy == .regular else {
-        return false
-      }
-    }
+    guard AXUIElementGetPid(element, &pid) == .success else { return false }
+    guard let app = NSRunningApplication(processIdentifier: pid),
+      app.activationPolicy == .regular
+    else { return false }
 
     return true
   }

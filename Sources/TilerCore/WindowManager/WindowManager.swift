@@ -737,11 +737,11 @@ public class WindowManager {
       else { continue }
       windowStore.register(wid: wid, element: element, pid: info.pid)
       noElementCandidates.remove(wid)
-      if managedIDs.contains(wid) {
-        stillAlive.insert(wid)
-      }
       if WindowFilter.isTileable(element) {
         tileableIDs.insert(wid)
+        if managedIDs.contains(wid) {
+          stillAlive.insert(wid)
+        }
         tiler_debug("reconcile: position-resolved tileable wid=\(wid) pid=\(info.pid)")
       } else {
         notTileableCandidates.insert(wid)
