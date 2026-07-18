@@ -679,6 +679,17 @@ public class WindowManager {
     // (isTileable == false) and destroyed (element == nil) windows remain dropped.
     let onScreenIDs = Set(windowInfo.keys)
 
+    // A native fullscreen window lives on its own dedicated Space. While it is active,
+    // macOS hides every other app's windows from both the on-screen CGWindowList AND the
+    // AX tree (kAXWindowsAttribute returns 0 for apps whose windows are all on the hidden
+    // regular Space). Detect that state so the stillAlive pass preserves the hidden managed
+    // windows instead of reaping them — reaping would re-add them as fresh columns on
+    // fullscreen exit, discarding their column assignments and widths. The first signal is
+    // a detected fullscreen window; the second covers the case where AX hasn't resolved the
+    // fullscreen window's element yet but its presence leaves no tileable windows on screen.
+    let fullscreenSpaceActive = !fullscreenOnScreenIDs.isEmpty
+      || (tileableIDs.isEmpty && !onScreenIDs.isEmpty && !notTileableCandidates.isEmpty)
+
     var stillAlive: Set<CGWindowID> = []
     for screenState in state.screens.values {
       let visibleFrame = screenState.info.visibleFrame
@@ -707,6 +718,17 @@ public class WindowManager {
                   // Can't read AX tree — transient issue, keep alive
                   stillAlive.insert(window.id)
                 }
+              } else if fullscreenSpaceActive {
+                // No element because the AX tree hides this app's windows while a fullscreen
+                // Space is active (kAXWindowsAttribute returns 0 for off-Space apps). The
+                // window is on the hidden regular Space, not destroyed — keep it alive so it
+                // is not reaped and re-added fresh when fullscreen exits. Minimized windows
+                // land here too during fullscreen; they are reaped once fullscreen exits and
+                // they reappear as not-tileable, preserving the minimized=reap contract.
+                stillAlive.insert(window.id)
+                tiler_debug(
+                  "reconcile: preserving wid=\(window.id) pid=\(window.pid) (AX-hidden by fullscreen Space)"
+                )
               }
               continue
             }
@@ -715,19 +737,11 @@ public class WindowManager {
               stillAlive.insert(window.id)
               continue
             }
-            // Absent from the on-screen list, but a native fullscreen window is active on
-            // another Space. macOS moves fullscreen windows to a dedicated Space, so every
-            // window on the regular Space vanishes from the on-screen CGWindowList for the
-            // whole fullscreen duration. This window is tileable (not minimized) and still
-            // has a live element, so it is hidden by the Space switch — not closed/minimized.
-            // Keep it alive so it is not reaped and re-added as a fresh column (which would
-            // discard its column assignment and width) when fullscreen exits. Minimized
-            // windows fail isTileable above and fall through to be reaped as before.
-            if !fullscreenOnScreenIDs.isEmpty {
+            // Absent from the on-screen list while a fullscreen Space is active: the window
+            // is tileable and still has a live element but is on the hidden regular Space.
+            // Keep it alive rather than reaping it (see fullscreenSpaceActive above).
+            if fullscreenSpaceActive {
               stillAlive.insert(window.id)
-              tiler_debug(
-                "reconcile: preserving wid=\(window.id) pid=\(window.pid) (hidden by fullscreen Space)"
-              )
               continue
             }
             // Absent from the on-screen list. Keep it if it has no applied frame yet (just
