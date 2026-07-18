@@ -5,6 +5,7 @@ import TOMLKit
 /// Falls back to `Config.defaults` when the file is missing or invalid.
 public class ConfigLoader {
   private let fileManager = FileManager.default
+  private var lastLoadedMtime: Date?
 
   public init() {}
 
@@ -21,6 +22,7 @@ public class ConfigLoader {
       tiler_log("No config found at \(path), using defaults")
       return Config.defaults
     }
+    recordMtime(at: path)
 
     do {
       let content = try String(contentsOfFile: path, encoding: .utf8)
@@ -30,6 +32,36 @@ public class ConfigLoader {
       tiler_log("Failed to parse config: \(error)")
       tiler_log("Using defaults")
       return Config.defaults
+    }
+  }
+
+  /// Re-read the config only when the file's mtime has advanced since the last
+  /// successful load. Returns nil when the file is unchanged, missing, or fails
+  /// to parse, so a transient write error never resets the running config to
+  /// defaults — callers keep whatever is currently applied.
+  @discardableResult
+  public func reloadIfChanged() -> Config? {
+    let path = configPath
+    guard let attrs = try? fileManager.attributesOfItem(atPath: path),
+      let mtime = attrs[.modificationDate] as? Date
+    else { return nil }
+    if let last = lastLoadedMtime, mtime <= last { return nil }
+    do {
+      let content = try String(contentsOfFile: path, encoding: .utf8)
+      let toml = try TOMLTable(string: content)
+      let config = parseConfig(from: toml)
+      lastLoadedMtime = mtime
+      return config
+    } catch {
+      tiler_log("Failed to parse config on reload: \(error) — keeping current config")
+      return nil
+    }
+  }
+
+  private func recordMtime(at path: String) {
+    if let attrs = try? fileManager.attributesOfItem(atPath: path),
+      let mtime = attrs[.modificationDate] as? Date {
+      lastLoadedMtime = mtime
     }
   }
 
