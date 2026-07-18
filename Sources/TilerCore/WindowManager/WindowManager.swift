@@ -699,8 +699,24 @@ public class WindowManager {
             guard let element = windowStore.element(for: window.id),
               WindowFilter.isTileable(element)
             else {
-              // Window has no element mapping. Check if it's a transient SPI
-              // failure (window still in AX tree but axGetWindowID failed) vs
+              // No element, or element present but not tileable. While a fullscreen Space is
+              // active, macOS hides off-Space apps from the AX tree (kAXWindowsAttribute
+              // returns 0) and flickers them in and out of the on-screen CGWindowList, so a
+              // managed window may land here either way — vanished from CG, or present in CG
+              // with no element. Either way it is on the hidden regular Space, not destroyed.
+              // Keep it alive; it is reaped via the normal miss path after fullscreen exits if
+              // it was actually closed or minimized. This must be checked before the AX-tree
+              // probe below, which would drop the window because the hidden app's AX list is
+              // empty. Minimized windows reappear as not-tileable once fullscreen exits and
+              // are reaped then, preserving the minimized=reap contract.
+              if fullscreenSpaceActive {
+                stillAlive.insert(window.id)
+                tiler_debug(
+                  "reconcile: preserving wid=\(window.id) pid=\(window.pid) (AX-hidden by fullscreen Space)"
+                )
+                continue
+              }
+              // Transient SPI failure (window still in AX tree but axGetWindowID failed) vs
               // actual destruction (window gone from AX entirely).
               if onScreenIDs.contains(window.id) {
                 // Read AX window list for this PID to check if window still exists
@@ -718,17 +734,6 @@ public class WindowManager {
                   // Can't read AX tree — transient issue, keep alive
                   stillAlive.insert(window.id)
                 }
-              } else if fullscreenSpaceActive {
-                // No element because the AX tree hides this app's windows while a fullscreen
-                // Space is active (kAXWindowsAttribute returns 0 for off-Space apps). The
-                // window is on the hidden regular Space, not destroyed — keep it alive so it
-                // is not reaped and re-added fresh when fullscreen exits. Minimized windows
-                // land here too during fullscreen; they are reaped once fullscreen exits and
-                // they reappear as not-tileable, preserving the minimized=reap contract.
-                stillAlive.insert(window.id)
-                tiler_debug(
-                  "reconcile: preserving wid=\(window.id) pid=\(window.pid) (AX-hidden by fullscreen Space)"
-                )
               }
               continue
             }
