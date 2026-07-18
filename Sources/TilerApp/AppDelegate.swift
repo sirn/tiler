@@ -9,6 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var configLoader: ConfigLoader?
   private var statusBar: StatusBarController?
   private var permissionPollTimer: Timer?
+  private var configReloadTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     // Install crash handlers early so we can recover even during startup.
@@ -38,6 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    configReloadTimer?.invalidate()
     windowManager?.gatherWindowsToMainScreen()
     windowManager?.deleteCrashRecoveryFile()
     windowManager?.saveState()
@@ -109,15 +111,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Set up hotkey dispatcher
     let dispatcher = HotkeyDispatcher()
-    let bindings = defaultKeybindings.merging(keybindingsFromConfig(config.keybinds)) { _, config in
-      config
-    }
-    dispatcher.setBindings(bindings)
+    dispatcher.setBindings(keybindings(for: config))
     dispatcher.setActionHandler { [weak self] action in
       self?.windowManager?.handleAction(action)
     }
     dispatcher.start()
     self.hotkeyDispatcher = dispatcher
+
+    // Watch the config file and hot-apply changes. Covers gaps, layout
+    // (default column width, center-focused-column), workspace count, app rules
+    // (float + column_width), focus wrap, and keybindings. A transient parse
+    // error is ignored so a half-written file never resets the running config.
+    configReloadTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      guard let self = self,
+        let loader = self.configLoader,
+        let wm = self.windowManager
+      else { return }
+      guard let newConfig = loader.reloadIfChanged() else { return }
+      tiler_log("Config file changed; reloading")
+      wm.applyConfig(newConfig)
+      self.hotkeyDispatcher?.setBindings(self.keybindings(for: newConfig))
+    }
   }
 
   /// Polls Accessibility trust state and runs `startCore()` on the first grant.
@@ -141,6 +155,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   // MARK: - Keybind helpers
+
+  /// Merge hardcoded defaults with config keybinds (config wins on conflict).
+  private func keybindings(for config: Config) -> [KeyCombo: Action] {
+    defaultKeybindings.merging(keybindingsFromConfig(config.keybinds)) { _, cfg in cfg }
+  }
 
   /// Convert config keybinds into HotkeyDispatcher bindings.
   private func keybindingsFromConfig(_ keybinds: [KeybindConfig]) -> [KeyCombo: Action] {
