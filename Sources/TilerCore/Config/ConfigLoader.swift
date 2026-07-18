@@ -6,6 +6,7 @@ import TOMLKit
 public class ConfigLoader {
   private let fileManager = FileManager.default
   private var lastLoadedMtime: Date?
+  private var pendingMtime: Date?
 
   public init() {}
 
@@ -45,15 +46,28 @@ public class ConfigLoader {
     guard let attrs = try? fileManager.attributesOfItem(atPath: path),
       let mtime = attrs[.modificationDate] as? Date
     else { return nil }
-    if let last = lastLoadedMtime, mtime <= last { return nil }
+    if mtime == lastLoadedMtime {
+      pendingMtime = nil
+      return nil
+    }
+    // Require the mtime to be stable across two consecutive polls before
+    // applying, so a transiently-empty or half-written file from an in-place
+    // (truncating) write is not parsed mid-save. Editors that atomic-save are
+    // already safe; this covers shell redirection and similar.
+    guard mtime == pendingMtime else {
+      pendingMtime = mtime
+      return nil
+    }
     do {
       let content = try String(contentsOfFile: path, encoding: .utf8)
       let toml = try TOMLTable(string: content)
       let config = parseConfig(from: toml)
       lastLoadedMtime = mtime
+      pendingMtime = nil
       return config
     } catch {
       tiler_log("Failed to parse config on reload: \(error) — keeping current config")
+      pendingMtime = nil
       return nil
     }
   }

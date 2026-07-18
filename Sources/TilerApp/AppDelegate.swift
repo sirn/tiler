@@ -130,6 +130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       guard let newConfig = loader.reloadIfChanged() else { return }
       tiler_log("Config file changed; reloading")
       wm.applyConfig(newConfig)
+      self.statusBar?.setWorkspaceCount(wm.workspaceCount)
       self.hotkeyDispatcher?.setBindings(self.keybindings(for: newConfig))
     }
   }
