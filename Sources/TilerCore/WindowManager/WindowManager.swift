@@ -699,16 +699,11 @@ public class WindowManager {
             guard let element = windowStore.element(for: window.id),
               WindowFilter.isTileable(element)
             else {
-              // No element, or element present but not tileable. While a fullscreen Space is
-              // active, macOS hides off-Space apps from the AX tree (kAXWindowsAttribute
-              // returns 0) and flickers them in and out of the on-screen CGWindowList, so a
-              // managed window may land here either way — vanished from CG, or present in CG
-              // with no element. Either way it is on the hidden regular Space, not destroyed.
-              // Keep it alive; it is reaped via the normal miss path after fullscreen exits if
-              // it was actually closed or minimized. This must be checked before the AX-tree
-              // probe below, which would drop the window because the hidden app's AX list is
-              // empty. Minimized windows reappear as not-tileable once fullscreen exits and
-              // are reaped then, preserving the minimized=reap contract.
+              // No element, or not tileable. During fullscreen the hidden regular Space leaves
+              // these windows without an AX element (see fullscreenSpaceActive), so check that
+              // before the AX-tree probe below — the probe would drop them because the hidden
+              // app's AX list is empty. Kept windows that were actually closed or minimized
+              // are reaped via the normal miss path once fullscreen exits.
               if fullscreenSpaceActive {
                 stillAlive.insert(window.id)
                 tiler_debug(
