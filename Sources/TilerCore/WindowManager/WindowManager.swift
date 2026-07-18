@@ -583,6 +583,7 @@ public class WindowManager {
 
     var tileableIDs: Set<CGWindowID> = []
     var notTileableCandidates: Set<CGWindowID> = []
+    var fullscreenOnScreenIDs: Set<CGWindowID> = []
     var noElementCandidates: Set<CGWindowID> = []
     var windowInfo: [CGWindowID: (pid: pid_t, title: String, bounds: NSRect)] = [:]
     var skippedNoElement = 0
@@ -612,6 +613,9 @@ public class WindowManager {
         } else {
           skippedNotTileable += 1
           notTileableCandidates.insert(wid)
+          if WindowFilter.isFullscreen(element) {
+            fullscreenOnScreenIDs.insert(wid)
+          }
           tiler_debug("reconcile: skip not-tileable wid=\(wid) title='\(title)' pid=\(pid)")
         }
       } else {
@@ -709,6 +713,21 @@ public class WindowManager {
 
             if onScreenIDs.contains(window.id) {
               stillAlive.insert(window.id)
+              continue
+            }
+            // Absent from the on-screen list, but a native fullscreen window is active on
+            // another Space. macOS moves fullscreen windows to a dedicated Space, so every
+            // window on the regular Space vanishes from the on-screen CGWindowList for the
+            // whole fullscreen duration. This window is tileable (not minimized) and still
+            // has a live element, so it is hidden by the Space switch — not closed/minimized.
+            // Keep it alive so it is not reaped and re-added as a fresh column (which would
+            // discard its column assignment and width) when fullscreen exits. Minimized
+            // windows fail isTileable above and fall through to be reaped as before.
+            if !fullscreenOnScreenIDs.isEmpty {
+              stillAlive.insert(window.id)
+              tiler_debug(
+                "reconcile: preserving wid=\(window.id) pid=\(window.pid) (hidden by fullscreen Space)"
+              )
               continue
             }
             // Absent from the on-screen list. Keep it if it has no applied frame yet (just
