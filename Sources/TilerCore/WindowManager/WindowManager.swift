@@ -496,6 +496,12 @@ public class WindowManager {
     matchingAppRules(pid: pid).contains { $0.action == "float" }
   }
 
+  /// Returns the preferred column width fraction from the first matching app
+  /// rule that specifies column_width, or nil if none do.
+  private func appRuleColumnWidth(pid: pid_t) -> CGFloat? {
+    matchingAppRules(pid: pid).compactMap { $0.columnWidth }.first
+  }
+
   // MARK: - Event handling
 
   private func handleEvent(_ event: TilerEvent) {
@@ -1368,12 +1374,17 @@ public class WindowManager {
       }
     }
 
-    // Preserve the window's current width as a fraction of usable viewport width.
+    // An app rule may pin a preferred column width fraction; otherwise preserve
+    // the window's current width as a fraction of usable viewport width.
     let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
-    let widthFraction =
-      usableWidth > 0
-      ? min(max(bounds.width / usableWidth, 0.1), 1.0)
-      : layoutConfig.defaultColumnWidth
+    let widthFraction: CGFloat
+    if let ruleWidth = appRuleColumnWidth(pid: pid) {
+      widthFraction = min(max(ruleWidth, 0.1), 1.0)
+    } else if usableWidth > 0 {
+      widthFraction = min(max(bounds.width / usableWidth, 0.1), 1.0)
+    } else {
+      widthFraction = layoutConfig.defaultColumnWidth
+    }
 
     let column = Column(
       windows: [node], focusedWindowIndex: 0, widthFraction: widthFraction)
