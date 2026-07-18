@@ -75,4 +75,13 @@ public enum WindowFilter {
 
     return true
   }
+
+  /// True when the window is in native macOS fullscreen (its own dedicated Space).
+  /// Used to detect that the regular Space is hidden, so windows absent from the
+  /// on-screen CGWindowList are merely on the hidden Space rather than gone.
+  public static func isFullscreen(_ element: AXUIElement) -> Bool {
+    var fullScreen: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullScreen)
+      == .success && (fullScreen as? Bool) == true
+  }
 }
