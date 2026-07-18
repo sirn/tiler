@@ -136,4 +136,43 @@ final class ReconcileTests: XCTestCase {
     XCTAssertFalse(plan.hasPendingResolve)
     XCTAssertTrue(plan.updatedResolveCounts.isEmpty)
   }
+
+  // MARK: - native fullscreen Space regression
+  // When a window enters native macOS fullscreen, every window on the regular Space
+  // vanishes from the on-screen CGWindowList for the whole fullscreen duration. The
+  // WindowManager fix keeps those windows in stillAliveIDs (they are hidden by the Space
+  // switch, not closed/minimized). These tests pin the contract reconcilePlan relies on:
+  // stillAlive windows are never reaped, even over a long fullscreen session, while the
+  // same windows dropped from stillAliveIDs (the pre-fix bug) are reaped after the
+  // threshold — which discarded their column assignments and widths on fullscreen exit.
+
+  func testFullscreenSpaceHiddenWindowsSurviveAcrossPasses() {
+    let hidden: Set<CGWindowID> = [670, 8212, 11469, 11791, 12065, 12091, 14728, 15099, 15647]
+    var counts: [CGWindowID: Int] = [:]
+    for _ in 0..<150 {
+      let plan = reconcilePlan(
+        managedIDs: hidden, stillAliveIDs: hidden, tileableIDs: [],
+        missingCounts: counts, missThreshold: 2)
+      XCTAssertEqual(plan.toReap, [])
+      counts = plan.updatedMissingCounts
+    }
+    XCTAssertTrue(counts.values.allSatisfy { $0 == 0 })
+  }
+
+  func testFullscreenSpaceHiddenWindowsReapedIfDroppedFromStillAlive() {
+    let hidden: Set<CGWindowID> = [670, 8212, 11469, 11791, 12065, 12091, 14728, 15099, 15647]
+    var counts: [CGWindowID: Int] = [:]
+    var reaped: Set<CGWindowID> = []
+    // Pre-fix behavior: Space-hidden windows were absent from stillAlive, so each pass
+    // incremented their miss count until the threshold reaped them — well within a
+    // typical fullscreen session.
+    for _ in 0..<3 {
+      let plan = reconcilePlan(
+        managedIDs: hidden, stillAliveIDs: [], tileableIDs: [],
+        missingCounts: counts, missThreshold: 2)
+      reaped = plan.toReap
+      counts = plan.updatedMissingCounts
+    }
+    XCTAssertEqual(reaped, hidden)
+  }
 }

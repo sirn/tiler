@@ -583,6 +583,7 @@ public class WindowManager {
 
     var tileableIDs: Set<CGWindowID> = []
     var notTileableCandidates: Set<CGWindowID> = []
+    var fullscreenOnScreenIDs: Set<CGWindowID> = []
     var noElementCandidates: Set<CGWindowID> = []
     var windowInfo: [CGWindowID: (pid: pid_t, title: String, bounds: NSRect)] = [:]
     var skippedNoElement = 0
@@ -612,6 +613,9 @@ public class WindowManager {
         } else {
           skippedNotTileable += 1
           notTileableCandidates.insert(wid)
+          if WindowFilter.isFullscreen(element) {
+            fullscreenOnScreenIDs.insert(wid)
+          }
           tiler_debug("reconcile: skip not-tileable wid=\(wid) title='\(title)' pid=\(pid)")
         }
       } else {
@@ -675,6 +679,17 @@ public class WindowManager {
     // (isTileable == false) and destroyed (element == nil) windows remain dropped.
     let onScreenIDs = Set(windowInfo.keys)
 
+    // A native fullscreen window lives on its own dedicated Space. While it is active,
+    // macOS hides every other app's windows from both the on-screen CGWindowList AND the
+    // AX tree (kAXWindowsAttribute returns 0 for apps whose windows are all on the hidden
+    // regular Space). Detect that state so the stillAlive pass preserves the hidden managed
+    // windows instead of reaping them — reaping would re-add them as fresh columns on
+    // fullscreen exit, discarding their column assignments and widths. The first signal is
+    // a detected fullscreen window; the second covers the case where AX hasn't resolved the
+    // fullscreen window's element yet but its presence leaves no tileable windows on screen.
+    let fullscreenSpaceActive = !fullscreenOnScreenIDs.isEmpty
+      || (tileableIDs.isEmpty && !onScreenIDs.isEmpty && !notTileableCandidates.isEmpty)
+
     var stillAlive: Set<CGWindowID> = []
     for screenState in state.screens.values {
       let visibleFrame = screenState.info.visibleFrame
@@ -684,8 +699,24 @@ public class WindowManager {
             guard let element = windowStore.element(for: window.id),
               WindowFilter.isTileable(element)
             else {
-              // Window has no element mapping. Check if it's a transient SPI
-              // failure (window still in AX tree but axGetWindowID failed) vs
+              // No element, or element present but not tileable. While a fullscreen Space is
+              // active, macOS hides off-Space apps from the AX tree (kAXWindowsAttribute
+              // returns 0) and flickers them in and out of the on-screen CGWindowList, so a
+              // managed window may land here either way — vanished from CG, or present in CG
+              // with no element. Either way it is on the hidden regular Space, not destroyed.
+              // Keep it alive; it is reaped via the normal miss path after fullscreen exits if
+              // it was actually closed or minimized. This must be checked before the AX-tree
+              // probe below, which would drop the window because the hidden app's AX list is
+              // empty. Minimized windows reappear as not-tileable once fullscreen exits and
+              // are reaped then, preserving the minimized=reap contract.
+              if fullscreenSpaceActive {
+                stillAlive.insert(window.id)
+                tiler_debug(
+                  "reconcile: preserving wid=\(window.id) pid=\(window.pid) (AX-hidden by fullscreen Space)"
+                )
+                continue
+              }
+              // Transient SPI failure (window still in AX tree but axGetWindowID failed) vs
               // actual destruction (window gone from AX entirely).
               if onScreenIDs.contains(window.id) {
                 // Read AX window list for this PID to check if window still exists
@@ -708,6 +739,13 @@ public class WindowManager {
             }
 
             if onScreenIDs.contains(window.id) {
+              stillAlive.insert(window.id)
+              continue
+            }
+            // Absent from the on-screen list while a fullscreen Space is active: the window
+            // is tileable and still has a live element but is on the hidden regular Space.
+            // Keep it alive rather than reaping it (see fullscreenSpaceActive above).
+            if fullscreenSpaceActive {
               stillAlive.insert(window.id)
               continue
             }
