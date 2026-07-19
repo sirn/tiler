@@ -24,6 +24,9 @@ default_column_width = 0.5
 #   "on-overflow"  centre it only when it is wider than the viewport
 #   "always"       always centre the focused column
 center_focused_column = "never"
+# When true, a workspace with a single column is always centred, regardless
+# of center_focused_column. Mirrors Niri's always-center-single-column.
+always_center_single_column = false
 
 # Workspaces
 
