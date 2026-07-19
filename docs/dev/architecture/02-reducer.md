@@ -1,0 +1,51 @@
+# 02 — Reducer
+
+The reducer is the pure core. It turns an action and the current state into a new state plus a list of side-effects, without touching the outside world. This stage covers the `Action` values that go in, the `Reducer.apply` function itself, and the `Effect` values that come out.
+
+## Action
+
+An `Action` enum value describes an intent — e.g. `.focusColumnLeft`, `.focusWorkspace(3)`, `.consumeOrExpelRight`, `.closeWindow`. It says *what the user or system wants*, not *how to do it*, and carries no state beyond its arguments (e.g. the workspace index).
+
+Actions come from two sources:
+
+- Hotkey presses (Carbon), parsed into `Action` values by the keybind parser.
+- System events: `AXObserver` and `NSWorkspace` notifications, plus the periodic `CGWindowList` reconcile pass, translated into `Action` values by the shell. Focus-event translation is covered in [../topics/focus.md](../topics/focus.md).
+
+## Reducer.apply
+
+All layout decisions — which column is focused, where a moved window lands, how widths change — happen in a pure static function:
+
+```swift
+enum Reducer {
+  static func apply(
+    _ action: Action,
+    to state: inout TilerState,
+    env: ReducerEnv
+  ) -> [Effect]
+}
+```
+
+The purity contract: no I/O, no AX, no CG, no filesystem, no timers. The reducer never observes the outside world; it reads only `state` and `env`. `ReducerEnv` carries the read-only inputs the reducer needs to make decisions — `workspaceCount`, `activeScreenID`, `orderedScreenIDs`, `focusColumnWrap` — and never carries live handles. The same `(action, state, env)` always yields the same new state and effects.
+
+Rationale: `Tests/TilerCoreTests/` constructs a `TilerState`, applies actions, and asserts on the resulting state and effects with no AX or CG access. Column math, viewport scrolling, and focus-clamping bugs are reproducible without launching the app. The suite has 80 pure-data tests.
+
+## Effect
+
+An `Effect` enum value is a description of a side-effect, not its execution. The reducer returns a list of these instead of acting, so the shell ([03-windowmanager.md](03-windowmanager.md)) decides how and when to perform them.
+
+```swift
+enum Effect: Equatable {
+  case retile
+  case focusFocusedWindow(ScreenID, WorkspaceID)
+  case raiseTabbedWindows(ScreenID, WorkspaceID)
+  case closeWindow(CGWindowID)
+  case toggleFullscreen(CGWindowID)
+  case refreshTabs(ScreenID, WorkspaceID)
+  case scheduleDeferredTabRefresh(ScreenID, WorkspaceID)
+  case log(String)
+}
+```
+
+`.retile` asks the shell to recompute and write frames; `.focusFocusedWindow` asks it to raise a window via AX; `.closeWindow` asks it to press the window's close button; `.log` asks it to emit a log line. An effect carries only the identifiers needed to perform it (a `CGWindowID`, a screen/workspace pair, a string) — never an `AXUIElement` handle, which the shell resolves from `WindowStore` at execution time (see [04-reconcile.md](04-reconcile.md)). Effects are `Equatable` so tests can assert on them.
+
+`raiseTabbedWindows` is emitted only from within-column focus changes; see [../topics/native-tabs.md](../topics/native-tabs.md).
