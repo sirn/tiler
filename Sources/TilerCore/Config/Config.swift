@@ -85,18 +85,22 @@ public enum CenterFocusedColumn: String, Codable {
 public struct LayoutConfig: Codable {
   public var defaultColumnWidth: CGFloat
   public var centerFocusedColumn: CenterFocusedColumn
+  public var alwaysCenterSingleColumn: Bool
 
   public init(
     defaultColumnWidth: CGFloat = 0.5,
-    centerFocusedColumn: CenterFocusedColumn = .never
+    centerFocusedColumn: CenterFocusedColumn = .never,
+    alwaysCenterSingleColumn: Bool = false
   ) {
     self.defaultColumnWidth = defaultColumnWidth
     self.centerFocusedColumn = centerFocusedColumn
+    self.alwaysCenterSingleColumn = alwaysCenterSingleColumn
   }
 
   enum CodingKeys: String, CodingKey {
     case defaultColumnWidth = "default_column_width"
     case centerFocusedColumn = "center_focused_column"
+    case alwaysCenterSingleColumn = "always_center_single_column"
   }
 }
 

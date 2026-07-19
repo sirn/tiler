@@ -220,6 +220,61 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertEqual(range, 0..<1)
   }
 
+  // MARK: - always-center-single-column
+
+  func testAlwaysCenterSingleColumnCentersLoneColumn() {
+    let ws = makeWorkspace(fractions: [0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, range) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    XCTAssertEqual(offset, cols[0].left - (U - cols[0].width) / 2, accuracy: 1.0)
+    XCTAssertEqual(range, 0..<1)
+    XCTAssertEqual(cols[0].left - offset, U - (cols[0].left - offset) - cols[0].width, accuracy: 1.0)
+  }
+
+  func testAlwaysCenterSingleColumnOffKeepsFlush() {
+    let ws = makeWorkspace(fractions: [0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: false)
+    XCTAssertEqual(offset, 0, accuracy: 0.5)
+  }
+
+  func testAlwaysCenterSingleColumnIgnoresMultiColumn() {
+    let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (withFlag, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    let (withoutFlag, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: false)
+    XCTAssertEqual(withFlag, withoutFlag, accuracy: 0.01)
+  }
+
+  func testAlwaysCenterSingleColumnCentersWideColumn() {
+    let ws = makeWorkspace(fractions: [1.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    XCTAssertEqual(offset, 250, accuracy: 1.0)
+  }
+
   // .onOverflow falls back to scroll-into-view when the focused column fits.
   func testCenterOnOverflowFallsBackToFit() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)
