@@ -110,6 +110,9 @@ public class ConfigLoader {
       {
         config.layout.centerFocusedColumn = mode
       }
+      if let acsc = layout["always_center_single_column"]?.bool {
+        config.layout.alwaysCenterSingleColumn = acsc
+      }
 
     }
 

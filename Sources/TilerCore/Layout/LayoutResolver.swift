@@ -5,14 +5,17 @@ public struct LayoutContext {
   public let screen: ScreenInfo
   public let gaps: GapConfig
   public let centerFocusedColumn: CenterFocusedColumn
+  public let alwaysCenterSingleColumn: Bool
 
   public init(
     screen: ScreenInfo, gaps: GapConfig,
-    centerFocusedColumn: CenterFocusedColumn = .never
+    centerFocusedColumn: CenterFocusedColumn = .never,
+    alwaysCenterSingleColumn: Bool = false
   ) {
     self.screen = screen
     self.gaps = gaps
     self.centerFocusedColumn = centerFocusedColumn
+    self.alwaysCenterSingleColumn = alwaysCenterSingleColumn
   }
 }
 
@@ -37,7 +40,8 @@ public enum LayoutResolver {
       focused: workspace.focusedColumnIndex,
       strip: cols,
       U: U,
-      centerMode: context.centerFocusedColumn
+      centerMode: context.centerFocusedColumn,
+      alwaysCenterSingleColumn: context.alwaysCenterSingleColumn
     )
     let frames = LayoutEngine.layout(
       workspace: workspace,

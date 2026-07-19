@@ -220,6 +220,72 @@ final class ViewportCalcTests: XCTestCase {
     XCTAssertEqual(range, 0..<1)
   }
 
+  // MARK: - always-center-single-column
+
+  // Single column with the flag on is centred even under centerMode .never,
+  // bypassing the [0, maxScroll] clamp. 1x0.5 col (width 500, left 0, U 1000):
+  // offset = 0 - (1000-500)/2 = -250.
+  func testAlwaysCenterSingleColumnCentersLoneColumn() {
+    let ws = makeWorkspace(fractions: [0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, range) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    XCTAssertEqual(offset, cols[0].left - (U - cols[0].width) / 2, accuracy: 1.0)
+    XCTAssertEqual(range, 0..<1)
+    // Focused column centred: left margin == right margin.
+    XCTAssertEqual(cols[0].left - offset, U - (cols[0].left - offset) - cols[0].width, accuracy: 1.0)
+  }
+
+  // With the flag off, a lone column under .never stays flush to the left
+  // (offset 0) rather than being centred.
+  func testAlwaysCenterSingleColumnOffKeepsFlush() {
+    let ws = makeWorkspace(fractions: [0.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: false)
+    XCTAssertEqual(offset, 0, accuracy: 0.5)
+  }
+
+  // The flag only applies to a lone column. With multiple columns it must not
+  // override .never, which just scrolls the focused column into view.
+  func testAlwaysCenterSingleColumnIgnoresMultiColumn() {
+    let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 2)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (withFlag, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    let (withoutFlag, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: false)
+    XCTAssertEqual(withFlag, withoutFlag, accuracy: 0.01)
+  }
+
+  // A lone column wider than the viewport is still centred (negative offset),
+  // matching .always behaviour. 1x1.5 col (width 1500, U 1000):
+  // offset = 0 - (1000-1500)/2 = 250.
+  func testAlwaysCenterSingleColumnCentersWideColumn() {
+    let ws = makeWorkspace(fractions: [1.5], focus: 0)
+    let screen = makeScreen()
+    let gaps = makeGaps()
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let U = LayoutGeometry.usableWidth(screen, gaps)
+    let (offset, _) = ViewportCalc.resolveOffset(
+      anchor: 0, focused: ws.focusedColumnIndex, strip: cols, U: U,
+      centerMode: .never, alwaysCenterSingleColumn: true)
+    XCTAssertEqual(offset, 250, accuracy: 1.0)
+  }
+
   // .onOverflow falls back to scroll-into-view when the focused column fits.
   func testCenterOnOverflowFallsBackToFit() {
     let ws = makeWorkspace(fractions: [0.5, 0.5, 0.5], focus: 1)

@@ -16,16 +16,20 @@ public enum ViewportCalc {
   /// - Returns: (offset, visibleRange) where visibleRange contains columns with any part overlapping the viewport.
   static func resolveOffset(
     anchor: CGFloat, focused: Int, strip: [ColumnLayout], U: CGFloat,
-    centerMode: CenterFocusedColumn = .never
+    centerMode: CenterFocusedColumn = .never,
+    alwaysCenterSingleColumn: Bool = false
   ) -> (offset: CGFloat, visibleRange: Range<Int>) {
     guard !strip.isEmpty else { return (0, 0..<0) }
     let f = min(focused, strip.count - 1)
     let maxScroll = max(0, LayoutGeometry.contentWidth(strip) - U)
 
-    // .always centres the focused column even when that leaves blank space at the
-    // strip edges (Niri parity), so it bypasses the overflow guard and the
-    // [0, maxScroll] clamp the other modes use to keep content flush.
-    if centerMode == .always {
+    // Centring bypasses the overflow guard and the [0, maxScroll] clamp the
+    // other modes use to keep content flush, because it may leave blank space
+    // at the strip edges (Niri parity). This covers .always, plus the
+    // always-center-single-column flag which forces centring of a lone
+    // column regardless of center-focused-column.
+    let centerSingle = alwaysCenterSingleColumn && strip.count == 1
+    if centerMode == .always || centerSingle {
       let s = strip[f].left - (U - strip[f].width) / 2
       let offset = round(s)
       return (offset, visibleAtOffset(strip, offset, U))
