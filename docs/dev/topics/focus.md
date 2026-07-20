@@ -13,13 +13,13 @@ Without compensation, tiled focus indices go stale and the next h/j/k/l acts on 
 
 ## 1. App activation sync
 
-Cmd+Tab and cross-app clicks are covered by `NSWorkspace` activation notifications, which re-derive focus from the now-frontmost app.
+`NSWorkspace` activation notifications cover Cmd+Tab and cross-app clicks, re-deriving focus from the now-frontmost app.
 
 `NSWorkspace.didActivateApplicationNotification` fires when an app becomes frontmost. Tiler re-derives the tiled focus from the frontmost app's `kAXFocusedWindowAttribute`, superseding stale pending focus and queuing a replay when the window is not tiled yet. A startup sync runs once because no activation notification fires for the already-frontmost app.
 
 ## 2. Re-derive on notification-element failure
 
-When the focus notification fires but its element will not resolve to a CG ID, focus is re-derived from the app's `kAXFocusedWindowAttribute`.
+`handleFocusChanged` re-derives focus from the app's `kAXFocusedWindowAttribute` when the focus notification fires but its element will not resolve to a CG ID.
 
 When the notification fires but its element does not resolve to a CG ID (`_AXUIElementGetWindow` fails transiently), `handleFocusChanged` re-derives the focused window from `kAXFocusedWindowAttribute`. The resolved element is carried forward for screen detection and pending replay, so a stale notification element does not leave `focusedScreenID` on the wrong screen.
 

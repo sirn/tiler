@@ -6,7 +6,7 @@ This topic spans three stages: the `GroupKey` identity that makes a tab group on
 
 ## Tab swap detection: resolveActiveTabSwap
 
-A tab switch is detected by finding which same-PID window now occupies the tile's frame, breaking ties by `kAXMain` and refusing on ambiguity.
+`resolveActiveTabSwap` detects a tab switch by finding which same-PID window now occupies the tile's frame, breaking ties by `kAXMain` and refusing on ambiguity.
 
 When the visible window at a tile's frame changes, `resolveActiveTabSwap` scans `CGWindowList` for on-screen windows of the same PID at the tile's frame:
 
@@ -56,6 +56,6 @@ When a new window appears with the same PID as an existing tab group (Cmd+T), `a
 
 ## Failure modes
 
-- **A new column appears on Cmd+T** — the merge did not fire; usually a PID mismatch with the focused column or an overly strict focused-column check.
+- **A new column appears on Cmd+T** — the merge did not fire; check for a PID mismatch with the focused column or an overly strict focused-column check.
 - **A background tab becomes an invisible column** — the swap was not detected; check `resolveActiveTabSwap` ambiguity refusal and whether the app sets `kAXMain` on the active tab.
 - **The wrong tab is raised after focus** — `raiseTabbedWindows` fired from a path it should not have; re-check the emitting reducer cases.
