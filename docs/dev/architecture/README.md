@@ -1,16 +1,38 @@
 # Architecture
 
-Tiler's runtime is split into a pure core that decides what the layout should be and an impure shell that makes it so by talking to macOS. Data flows one way:
+Tiler's runtime splits cleanly into a **pure core** that decides what the layout should be and an **impure shell** that makes it so by talking to macOS. The reducer is the only thing that mutates `TilerState`; the shell reads the outside world before the reducer and acts on its results after. This split keeps layout logic testable without AX or CG access — `Tests/TilerCoreTests/` runs with no Accessibility or screen access.
+
+## Core vs shell
+
+- **Pure core** (no AX/CG): [State (01)](01-state.md), [Reducer (02)](02-reducer.md).
+- **Shell** (impure; AX/CG): [WindowManager (03)](03-windowmanager.md) is the orchestrator; [Reconcile (04)](04-reconcile.md) is its **input** side (reads the world → Actions); [AX (05)](05-ax.md) is its **output** side (runs the reducer's Effects → AX/CG writes, plus subscriptions that feed observations back).
+
+Reconcile and AX are two halves of one shell that `WindowManager` orchestrates: it feeds the input side's Actions through the reducer and drains the reducer's Effects to the output side.
+
+## Runtime loop
+
+One pass of the loop, in time:
 
 ```
-State  ──▶  Action  ──▶  Reducer  ──▶  [Effect]  ──▶  Shell  ──▶  AX/CG  ──▶  (observed again)
-  ▲                                                                  │
-  └──────────────────── state mutation only inside the reducer ◀──────┘
+  Observe ──▶ Action ──▶ Reducer ──▶ [Effect] ──▶ Run effects ──▶ AX/CG writes
+     ▲        (shell       (pure core:        (WindowManager orchestrates;        │
+     │         builds it)   mutates State,     AX performs frame/focus writes)     │
+     │                       emits Effects)                                        │
+     │                                                                         │
+     └─────────────── changes the real windows, observed again ◀───────────────┘
 ```
 
-State mutation happens only inside the reducer. The shell reads the outside world before the reducer and acts on its results after, but the reducer itself is pure. This split keeps layout logic testable without AX or CG access.
+- **Observe** is the shell's input side: Reconcile reads `CGWindowList`/AX attributes, and `AXObserver` subscriptions deliver events. Both translate observations into Actions.
+- **Run effects** is the shell's output side: `WindowManager` drains the reducer's `[Effect]` list and `AX` writes frames, focuses windows, presses close buttons.
+- Both sides reach `State` through the reducer. The shell holds no parallel model of layout (see [01-state.md](01-state.md)).
 
-The pipeline has five stages, each in its own file below. Vocabulary used across these docs is defined in [../README.md](../README.md#concepts-and-vocabulary).
+Two actions bypass the reducer because they touch shell-owned state outside `TilerState` (`.toggleFloat`, `.dumpFrameState`); see [03-windowmanager.md](03-windowmanager.md#dispatch-entry-point).
+
+## Read order vs runtime order
+
+The five stage files are numbered **01–05 in read order**, following one data-flow pass from the source of truth outward. Treat the **Core vs shell** grouping and the **runtime loop** above as the mental model; the numbering exists only so cross-references stay stable.
+
+Vocabulary used across these docs is defined in [../README.md](../README.md#concepts-and-vocabulary).
 
 ## 1. [State](01-state.md)
 

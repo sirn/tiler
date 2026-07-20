@@ -2,7 +2,7 @@
 
 Reference documentation for Tiler internals.
 
-New readers: read [Concepts and vocabulary](#concepts-and-vocabulary) below first, then [architecture/README.md](architecture/README.md), which walks the five pipeline stages in order.
+New readers: read [Concepts and vocabulary](#concepts-and-vocabulary) below first, then [architecture/README.md](architecture/README.md), which walks the five pipeline stages.
 
 ## What Tiler is
 
@@ -35,13 +35,20 @@ Terms used throughout these docs:
 
 ## Pipeline stages
 
-The runtime is split into five ordered stages, each in its own file under [architecture/](architecture/):
+The runtime is grouped into a **pure core** and an **impure shell** that run in a one-way loop. The files are numbered 01–05 in read order (source of truth outward); each is self-contained.
+
+**Pure core** (no AX/CG):
 
 1. [01-state.md](architecture/01-state.md) — `TilerState` value-type tree, `GroupKey` identity.
-2. [02-reducer.md](architecture/02-reducer.md) — `Action`, `Reducer.apply`, `Effect`; the pure core.
-3. [03-windowmanager.md](architecture/03-windowmanager.md) — the shell: dispatch, drain loop, convergence model, reaping, screen-lifecycle guards.
-4. [04-reconcile.md](architecture/04-reconcile.md) — window discovery, tileability filtering, CG↔AX identity, orphan adoption, reaping suppression.
-5. [05-ax.md](architecture/05-ax.md) — `AXObserver` threading, refcon lifetime, EUI workaround, frame-write order.
+2. [02-reducer.md](architecture/02-reducer.md) — `Action`, `Reducer.apply`, `Effect`.
+
+**Shell** (impure; AX/CG):
+
+3. [03-windowmanager.md](architecture/03-windowmanager.md) — orchestrator: dispatch, drain loop, convergence model, reaping, screen-lifecycle guards.
+4. [04-reconcile.md](architecture/04-reconcile.md) — the shell's **input** side: window discovery, tileability filtering, CG↔AX identity, orphan adoption, reaping suppression.
+5. [05-ax.md](architecture/05-ax.md) — the shell's **output** side: `AXObserver` threading, refcon lifetime, EUI workaround, frame-write order.
+
+Reconcile (input) and AX (output) are two halves of one shell that `WindowManager` orchestrates: it feeds the input side's Actions through the reducer and drains the reducer's Effects to the output side. See [architecture/README.md](architecture/README.md) for the loop diagram.
 
 ## Cross-cutting topics
 
