@@ -52,23 +52,23 @@ guard
 else { return false }
 ```
 
-### AXStandardWindow is not sufficient
+### The close-button rule
 
 The close-button check is the durable rule because macOS promotes more window types to `AXStandardWindow` over time than the subrole string can enumerate.
 
 macOS Open/Save panels promoted to standalone windows report `AXStandardWindow` but lack a close button; tiling them would let `closeWindow` fail to close them. Chromium extension popups have `AXUnknown` subrole and no window buttons but pass the default case. The durable rule is the close-button check — macOS promotes more windows to `AXStandardWindow` over time, so checking for chrome is more robust than checking the subrole string.
 
-`AXDialog` is tileable only with a close button: chrome-bearing dialogs are legitimate; chrome-less popups such as the Telegram attachment menu are not.
+`AXDialog` is tileable only with a close button: chrome-bearing dialogs are legitimate; chrome-less popups such as the Telegram attachment menu are filtered out.
 
 ### Minimized and fullscreen
 
 Minimized and fullscreen windows are filtered out here and remembered as not-tileable so they can be restored when they return.
 
-Minimized windows are filtered here; the reconcile loop reaps them and `wasNotTileableLastPass` remembers them so unminimizing restores the column (see [03-windowmanager.md](03-windowmanager.md#wasnottileablelastpass-reset)). Fullscreen windows are also filtered. `WindowFilter.isFullscreen` separately detects native fullscreen (dedicated Space) so the reconciler treats an absent window as on a hidden Space rather than gone.
+Minimized windows are filtered here; the reconcile loop reaps them and `wasNotTileableLastPass` remembers them so unminimizing restores the column (see [03-windowmanager.md](03-windowmanager.md#wasnottileablelastpass-reset)). Fullscreen windows are also filtered. `WindowFilter.isFullscreen` separately detects native fullscreen (dedicated Space) so the reconciler treats an absent window as hidden on its Space, awaiting return.
 
 ### Activation policy
 
-Only regular apps are tiled; accessory and prohibited apps are not.
+Only `.regular` apps are tiled.
 
 ```swift
 guard let app = NSRunningApplication(processIdentifier: pid),
@@ -76,17 +76,17 @@ guard let app = NSRunningApplication(processIdentifier: pid),
 else { return false }
 ```
 
-`.accessory` and `.prohibited` apps are not tiled.
+Apps with `.accessory` or `.prohibited` policy are skipped.
 
 ### Modifying the filter
 
-- Reject anything macOS may promote to `AXStandardWindow` via the close-button check.
+- Reject anything macOS promotes to `AXStandardWindow` via the close-button check.
 - Accepting a new role or subrole requires a real-app justification (as for Emacs) and confirmation that `kAXWindowsAttribute` scoping makes it safe.
 - Verify against the safe test apps ([../README.md](../README.md)): Finder exercises tabs and dialogs; Calculator exercises small rigid windows.
 
 ## Window identity
 
-Tiler tracks windows by `CGWindowID` (a CoreGraphics identifier) and acts on them through `AXUIElement` (Accessibility). The two namespaces are not linked by a public API, and the private bridge that links them fails transiently. `WindowStore` maintains the mapping.
+Tiler tracks windows by `CGWindowID` (a CoreGraphics identifier) and acts on them through `AXUIElement` (Accessibility). The two namespaces have no public API linking them, and the private bridge that links them fails transiently. `WindowStore` maintains the mapping.
 
 ### Sources
 
@@ -95,7 +95,7 @@ Tiler consumes two window listings and bridges them: CG's composited window list
 - `CGWindowListCopyWindowInfo` — windows the system composites, keyed by `kCGWindowNumber` (`CGWindowID`), with owner PID, layer, bounds, and title.
 - `AXUIElementCreateApplication(pid).kAXWindowsAttribute` — the app's AX windows; the handles Tiler can move, focus, and close.
 
-CG lists overlays and menu-bar layers; AX omits windows whose role has not appeared yet. `axGetWindowID` (the private SPI mapping an AX element to a CG ID) fails transiently.
+CG lists overlays and menu-bar layers; AX omits windows whose role has yet to appear. `axGetWindowID` (the private SPI mapping an AX element to a CG ID) fails transiently.
 
 ### axGetWindowID and position fallback
 
@@ -108,7 +108,7 @@ if let foundWid = axGetWindowID(axWindow) {
 }
 ```
 
-`axGetWindowID` (`AXPrivate.swift`) is resolved at runtime via `dlsym`; if Apple removes the symbol it returns nil rather than crashing. On nil, the store falls back to position and size matching against the CG list with a 20-point tolerance.
+`axGetWindowID` (`AXPrivate.swift`) is resolved at runtime via `dlsym`; removing the Apple symbol degrades it to nil, never a crash. On nil, the store falls back to position and size matching against the CG list with a 20-point tolerance.
 
 The position fallback runs only when the PID has at most one AX window:
 
@@ -125,11 +125,11 @@ Two windows briefly share a frame during a drag. With multiple AX windows per PI
 
 Windows seen by CG but not yet by AX are adopted by a position-matching pass that excludes already-managed IDs.
 
-Windows present in CG but unresolved to an AX element are orphans — usually a window whose AX role has not appeared. A separate pass adopts them by position. The orphan pass subtracts `storedWids` from all CG IDs (before the layer filter); subtracting only from layer-≤-0 CG IDs would treat overlay windows at layer > 0 as missing orphans and re-admit them.
+Windows present in CG but unresolved to an AX element are orphans: a window whose AX role has yet to appear. A separate pass adopts them by position. The orphan pass subtracts `storedWids` from all CG IDs (before the layer filter); subtracting only from layer-≤-0 CG IDs would treat overlay windows at layer > 0 as missing orphans and re-admit them.
 
 ### Exponential backoff
 
-Position resolution is rate-limited so an event storm of unresolved windows does not hammer AX.
+Position resolution is rate-limited so an event storm of unresolved windows keeps AX load bounded.
 
 `tryPositionResolve` scans the app's AX windows for an unmapped element at a CG frame. Running it on every reconcile for every no-element window hammers AX during event storms (Amethyst #1766 class). A backoff map bounds the retries:
 
@@ -141,7 +141,7 @@ Each failure doubles the delay, capped at 5s. The periodic poll reconcile still 
 
 ### Ambiguity refusal
 
-When more than one AX window sits at the target frame, resolution refuses rather than guessing; the reconcile loop retries.
+When more than one AX window sits at the target frame, resolution refuses to guess; the reconcile loop retries.
 
 ```swift
 // Ambiguous — more than one candidate at this position
@@ -181,13 +181,13 @@ public func windowIDByIdentity(for element: AXUIElement) -> CGWindowID? {
 
 ### Identity failure mode
 
-Identity errors mis-target rather than crash; every path in this file preserves a refuse-rather-than-guess posture.
+Identity errors degrade to a mis-target, never a crash; every path in this file keeps a refuse-to-guess posture.
 
 A frame write moves an unrelated window, or a reap drops a window that is still open. The multi-window fallback gate, ambiguity refusal, backoff, and live rescan all preserve that posture. Preserve it when modifying this file.
 
 ## Reaping suppression
 
-A managed window absent from `CGWindowList` for one pass is not necessarily gone; `kAXWindowsAttribute` transiently returns fewer windows than exist. Reaping counts consecutive misses and reaps at a threshold; the mechanism lives in [03-windowmanager.md](03-windowmanager.md#reaping). Suppression flags below keep that mechanism from firing on transient disappearances.
+A managed window absent from `CGWindowList` for one pass may still be present; `kAXWindowsAttribute` transiently returns fewer windows than exist. Reaping counts consecutive misses and reaps at a threshold; the mechanism lives in [03-windowmanager.md](03-windowmanager.md#reaping). Suppression flags below keep that mechanism from firing on transient disappearances.
 
 ### Lock/unlock
 
