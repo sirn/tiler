@@ -1,6 +1,6 @@
 # 01 — State
 
-`TilerState` is a tree of plain Swift value types describing every managed window and its placement. It is the single source of truth for layout — the shell never holds a parallel model of where windows are.
+`TilerState` is a tree of plain Swift value types describing every managed window and its placement. It is the single source of truth for layout — the shell uses it as its sole model of where windows are.
 
 ```
 TilerState
@@ -15,11 +15,11 @@ TilerState
             └─ id: CGWindowID, groupKey: GroupKey, pid, title
 ```
 
-Everything is a value type, so a mutation is a copy-and-replace. State carries no handles to the outside world — no `AXUIElement`, no file descriptors, no timers; those live in the shell. This is what lets the reducer ([02-reducer.md](02-reducer.md)) mutate state without performing I/O.
+Everything is a value type, so a mutation is a copy-and-replace. State holds only value-type data — `AXUIElement`, file descriptors, and timers all live in the shell. This is what lets the reducer ([02-reducer.md](02-reducer.md)) mutate state without performing I/O.
 
 ## GroupKey
 
-A tile's identity is not its `CGWindowID` — tab IDs come and go. Each tile is minted a `GroupKey`, a stable process-local identity that survives native-tab backing-ID swaps:
+Since `CGWindowID` is transient due to native tabs, a stable process-local identity `GroupKey` is generated for each tile, surviving native-tab backing-ID swaps:
 
 ```swift
 private var nextGroupToken: UInt64 = 0
@@ -33,4 +33,4 @@ The window node stores `groupKey` alongside `id` (the current `CGWindowID`). `ap
 
 ## measuredMinWidth / measuredMinHeight
 
-A column records the real minimum size of a window that resisted sizing, so subsequent layouts honor it instead of fighting the window. The values are absorbed by the corrector — see [03-windowmanager.md](03-windowmanager.md#bounded-corrector) — and reset when a window returns from fullscreen or minimize (see [03-windowmanager.md](03-windowmanager.md#wasnottileablelastpass-reset)).
+A column records the real minimum size of a window that resisted sizing, so subsequent layouts honor it. The values are absorbed by the corrector (see [03-windowmanager.md](03-windowmanager.md#bounded-corrector)) and reset when a window returns from fullscreen or minimize (see [03-windowmanager.md](03-windowmanager.md#wasnottileablelastpass-reset)).
