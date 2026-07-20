@@ -31,7 +31,7 @@ Two actions bypass the reducer entirely: `.toggleFloat` mutates a floating set t
 
 ## Drain loop
 
-Retile requests are coalesced so a burst of AX events produces one layout pass, not one per event. Two flags gate the work:
+Retile requests are coalesced so a burst of AX events produces a single layout pass. Two flags gate the work:
 
 ```swift
 private var needsRetile = false
@@ -42,7 +42,7 @@ private var drainScheduled = false
 
 ## Convergence model
 
-AX frame writes are not transactional, and a user drag produces a geometry-changed notification indistinguishable from the echo of the shell's own write. The convergence model tells them apart so the shell can correct its own writes without fighting the user.
+AX frame writes are not transactional, and a user drag produces a geometry-changed notification indistinguishable from the echo of the shell's own write. The convergence model tells them apart so the shell corrects its own writes while leaving user drags untouched.
 
 The shell sets `AXPosition` then `AXSize`; macOS clamps position based on the current size, so position is reapplied after the resize (see `applyOne` in `AXWindowBridge`, [05-ax.md](05-ax.md)).
 
@@ -62,7 +62,7 @@ private var appliedWindows: [WindowNode.GroupKey: AppliedWindow] = [:]
 
 The record is written before the frame is applied (`WindowManager.swift:2038`), so the echoing AX notification matches a record. `epoch` discards records from superseded retiles — only records with `record.epoch == applyEpoch` are actionable. Records are keyed by `GroupKey` ([01-state.md](01-state.md#groupkey)), not `CGWindowID`, so a native-tab swap does not lose the frame.
 
-### Echo vs genuine move
+### Echo and genuine move
 
 A geometry change is classified by comparing the observed frame to the last frame the shell applied. The pure classifier lives in `Reconcile.swift`:
 
@@ -78,7 +78,7 @@ public func classifyGeometryChange(observed: NSRect, applied: NSRect?, tolerance
 - `.echo` — window is at the requested frame; clear the correction counter.
 - `.genuineMove` — window is elsewhere; schedule a debounced snap-back retile (`moveSettleToken`).
 
-No recorded frame (a window Tiler has never tiled) is a genuine move; the shell does not fight unmanaged windows.
+A window Tiler has never tiled has no recorded frame and counts as a genuine move; the shell leaves unmanaged windows alone.
 
 ### Bounded corrector
 
@@ -104,13 +104,13 @@ if AXWindowBridge.framesMatch(observed, record.frame, tolerance: 2.0) {
 The three-attempt budget bounds the loop: terminals are character-cell quantized and many apps have a hard minimum size. The two give-up branches each prevent an infinite loop:
 
 - `absorbMinWidth` / `absorbMinHeight` — record the window's real minimum as `column.measuredMinWidth` ([01-state.md](01-state.md#measuredminwidth--measuredminheight)) and retile to honor it; the next `framesMatch` succeeds.
-- accept the settled frame — when the window landed smaller than requested, rewrite the echo reference to the observed frame so the snap-back path does not re-issue a frame the window cannot reach.
+- accept the settled frame — when the window landed smaller than requested, rewrite the echo reference to the observed frame so the snap-back path accepts the window's settled frame.
 
 Re-issues are batched into one `AXWindowBridge.applyFrames` call per drain, so the `AXEnhancedUserInterface` toggle fires once per app ([05-ax.md](05-ax.md#axenhanceduserinterface)).
 
 ## Reaping
 
-A managed window absent from `CGWindowList` for one pass is not necessarily gone; `kAXWindowsAttribute` transiently returns fewer windows than exist. Reaping counts consecutive misses and reaps at a threshold (`Reconcile.reconcilePlan`):
+A managed window absent from `CGWindowList` for one pass may still be present; `kAXWindowsAttribute` transiently returns fewer windows than exist. Reaping counts consecutive misses and reaps at a threshold (`Reconcile.reconcilePlan`):
 
 ```swift
 for id in managedIDs {
@@ -183,4 +183,4 @@ wasNotTileableLastPass = (wasNotTileableLastPass.union(notTileableCandidates))
   .subtracting(tileableIDs)
 ```
 
-Union with this pass's not-tileable candidates, intersect with still-managed IDs (drop reaped), subtract currently-tileable IDs (drop recovered). Without stickiness, a window flickering out of `CGWindowList` mid-fullscreen would be forgotten and re-added from scratch, losing its column.
+Union with this pass's not-tileable candidates, intersect with still-managed IDs (drop reaped), subtract currently-tileable IDs (drop recovered). Stickiness keeps a window that flickers out of `CGWindowList` mid-fullscreen from being forgotten and re-added from scratch, losing its column.
