@@ -62,7 +62,7 @@ private var appliedWindows: [WindowNode.GroupKey: AppliedWindow] = [:]
 
 The record is written before the frame is applied (`WindowManager.swift:2038`), so the echoing AX notification matches a record. `epoch` discards records from superseded retiles — only records with `record.epoch == applyEpoch` are actionable. Records are keyed by `GroupKey` ([01-state.md](01-state.md#groupkey)), not `CGWindowID`, so a native-tab swap does not lose the frame.
 
-### Echo vs genuine move
+### Echo and genuine move
 
 A geometry change is classified by comparing the observed frame to the last frame the shell applied. The pure classifier lives in `Reconcile.swift`:
 
