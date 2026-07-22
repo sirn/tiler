@@ -819,7 +819,7 @@ public class WindowManager {
 
     if massDisappearance {
       tiler_log(
-        "reconcile: mass disappearance (\(managedIDs.count) managed, 0 alive) — suppressing reap, scheduling retry"
+        "reconcile: mass disappearance (\(managedIDs.count) managed, \(stillAlive.count) alive) — suppressing reap, scheduling retry"
       )
       missPendingToken &+= 1
       let token = missPendingToken
