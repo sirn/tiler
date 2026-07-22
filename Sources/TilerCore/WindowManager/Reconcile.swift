@@ -83,3 +83,27 @@ public func reconcilePlan(
     updatedResolveCounts: resolve, hasPendingResolve: hasPendingResolve,
     hasPendingNoElementResolve: hasPendingNoElementResolve)
 }
+
+/// Whether a reconcile pass should suppress reaping because the managed windows
+/// vanished en masse from a system transition rather than genuine closure.
+///
+/// Both cases require that no managed window is alive this pass:
+/// - Display-wake lag: CGWindowList returned nothing on screen while managed
+///   windows exist. The scan hasn't caught up to reality yet.
+/// - Screen saver / display sleep: the AX server is suspended, so every managed
+///   window loses its AX element at once, yet CGWindowList still reports them
+///   (onScreenIDs contains the managed ids). Reaping here would discard every
+///   column assignment and width, since the next pass re-adds the windows as
+///   fresh columns on the active workspace — exactly the screen-saver regression.
+///
+/// Genuine closure removes windows from CGWindowList, so managedIDs and
+/// onScreenIDs stop overlapping and this returns false; reaping proceeds.
+public func massDisappearanceActive(
+  managedIDs: Set<CGWindowID>,
+  stillAliveIDs: Set<CGWindowID>,
+  onScreenIDs: Set<CGWindowID>
+) -> Bool {
+  guard !managedIDs.isEmpty, stillAliveIDs.isEmpty else { return false }
+  if onScreenIDs.isEmpty { return true }
+  return !managedIDs.intersection(onScreenIDs).isEmpty
+}
