@@ -64,7 +64,7 @@ Behaviors that regress easily. Verify before merging a tiling change.
 
 - **Native macOS tabs** — creating tabs (Cmd+T in Finder) and switching them (Cmd+Shift+[ / ]) must not create a new column; the background tab swap must be detected.
 - **Non-standard windows** — dialogs, save sheets (`AXSheet`), open dialogs (`AXStandardWindow` without a close button), the Fonts panel (`AXFloatingWindow`), and Quick Look panels must be ignored.
-- **Fullscreen** — entering fullscreen marks a window non-tileable (skipped); exiting fullscreen must restore its previous column width without triggering minimum-width absorption.
+- **Fullscreen** — entering fullscreen marks a window non-tileable (skipped); exiting fullscreen must restore its previous column width without triggering minimum-width absorption. An app entering a fullscreen Space (e.g. mpv) must also not reap the other windows, which lose their AX element for the duration while staying composited in `CGWindowList`.
 - **Minimize/deminimize** — minimized windows must be cleanly reaped; unminimizing must place them back in the layout.
 - **Workspace switching** — inactive workspaces must park windows off-screen; switching back must restore layouts and preserve state across restarts.
 - **Multi-window same PID** — rapid simultaneous window creation from one process (e.g. Cmd+N in TextEdit) must track every window.
