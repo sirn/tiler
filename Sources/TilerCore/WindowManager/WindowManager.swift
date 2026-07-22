@@ -807,11 +807,8 @@ public class WindowManager {
     }
     noElementRetry = noElementRetry.filter { noElementCandidates.contains($0.key) }
 
-    // CGWindowList can return empty/near-empty for hundreds of ms after display wake.
-    // Only treat the pass as a mass disappearance when the scan itself returned no
-    // on-screen windows. If other windows are visible, managed windows being absent is
-    // genuine (closed/minimized) and should be reaped normally rather than suppressed.
-    let massDisappearance = !managedIDs.isEmpty && stillAlive.isEmpty && onScreenIDs.isEmpty
+    let massDisappearance = massDisappearanceActive(
+      managedIDs: managedIDs, stillAliveIDs: stillAlive, onScreenIDs: onScreenIDs)
 
     let reapingAllowed: Bool
     if let deadline = reapSuppressedUntil, Date() < deadline {

@@ -189,9 +189,27 @@ A frame write moves an unrelated window, or a reap drops a window that is still 
 
 A managed window absent from `CGWindowList` for one pass may still be present; `kAXWindowsAttribute` transiently returns fewer windows than exist. Reaping counts consecutive misses and reaps at a threshold; the mechanism lives in [03-windowmanager.md](03-windowmanager.md#reaping). Suppression flags below keep that mechanism from firing on transient disappearances.
 
+### Mass disappearance
+
+The primary guard, run every reconcile pass. When no managed window is alive the pass is unreliable — either the system is mid-transition or the scan hasn't caught up. The pure predicate `massDisappearanceActive` (`Reconcile.swift`) decides; `reconcile()` then skips reaping for that pass and schedules a 1s deferred retry:
+
+```swift
+let massDisappearance = massDisappearanceActive(
+  managedIDs: managedIDs, stillAliveIDs: stillAlive, onScreenIDs: onScreenIDs)
+```
+
+Both cases require `stillAlive` empty (no managed window has a live, tileable AX element this pass):
+
+- **Display-wake lag** — `onScreenIDs` empty: `CGWindowList` returned nothing on screen while managed windows exist. The scan hasn't caught up to reality.
+- **Screen saver / display sleep** — the AX server is suspended, so every managed window loses its AX element at once, yet `CGWindowList` still reports them (`onScreenIDs` overlaps `managedIDs`). Reaping here would discard every column assignment and width, since the next pass re-adds the windows as fresh columns on the active workspace.
+
+Genuine closure removes windows from `CGWindowList`, so `managedIDs` and `onScreenIDs` stop overlapping and the guard returns false; reaping proceeds.
+
+This guard is what protects the layout during the gap between the screen saver blanking the display — when AX elements vanish — and the `com.apple.screenIsLocked` notification arriving, which fires after the elements are already gone. The lock observers below extend the suppression across the rest of the locked interval.
+
 ### Lock/unlock
 
-On lock every managed window vanishes from `CGWindowList`; reaping is suppressed across lock and for a grace period after unlock so workspace assignments survive.
+A secondary signal: the lock/unlock observers suppress reaping across the lock and for a grace period after unlock, and pause the periodic poll so a late reconcile during the locked interval can't reap either.
 
 1. `reapingAllowed` flag in `reconcilePlan`:
 
@@ -202,7 +220,7 @@ if reapingAllowed {
 }
 ```
 
-2. Suppress reaping across lock and 3s after unlock. Lock sets `reapSuppressedUntil = .distantFuture` and stops the reconcile timer; unlock clears `missingCounts` and sets `reapSuppressedUntil = now + 3.0`:
+2. Lock sets `reapSuppressedUntil = .distantFuture` and stops the reconcile timer; unlock clears `missingCounts` and sets `reapSuppressedUntil = now + 3.0`:
 
 ```swift
 private func screenDidUnlock() {
@@ -214,6 +232,4 @@ private func screenDidUnlock() {
 
 Clearing `missingCounts` on unlock prevents lock-time miss counts from carrying into the first live pass.
 
-3. Mass-disappearance guard: if `managedIDs` is non-empty but `stillAlive` is empty, the pass is unreliable; skip reaping with a 1s deferred retry. Catches display sleep and similar transients.
-
-4. Wall-clock miss debounce: the `hasPendingMiss` retrigger is a 0.5s token-coalesced deferred dispatch. The miss threshold (`missThreshold = 2`) counted two passes, which on a fast machine is milliseconds.
+3. Wall-clock miss debounce: the `hasPendingMiss` retrigger is a 0.5s token-coalesced deferred dispatch. The miss threshold (`missThreshold = 2`) counted two passes, which on a fast machine is milliseconds.
