@@ -191,21 +191,22 @@ A managed window absent from `CGWindowList` for one pass may still be present; `
 
 ### Mass disappearance
 
-The primary guard, run every reconcile pass. When no managed window is alive the pass is unreliable — either the system is mid-transition or the scan hasn't caught up. The pure predicate `massDisappearanceActive` (`Reconcile.swift`) decides; `reconcile()` then skips reaping for that pass and schedules a 1s deferred retry:
+The primary guard, run every reconcile pass. The pure predicate `massDisappearanceActive` (`Reconcile.swift`) decides whether managed windows are vanishing from a system transition rather than genuine closure, and `reconcile()` skips reaping for that pass with a 1s deferred retry:
 
 ```swift
 let massDisappearance = massDisappearanceActive(
   managedIDs: managedIDs, stillAliveIDs: stillAlive, onScreenIDs: onScreenIDs)
 ```
 
-Both cases require `stillAlive` empty (no managed window has a live, tileable AX element this pass):
+The signal is managed windows still *composited* (in `onScreenIDs`) but with *no live AX element* this pass — `managedIDs` minus `stillAliveIDs`, intersected with `onScreenIDs`. Genuine closure removes a window from `CGWindowList`, so it drops out of that set; a window that keeps its CG entry but loses its element is AX-suspended, not closed.
 
 - **Display-wake lag** — `onScreenIDs` empty: `CGWindowList` returned nothing on screen while managed windows exist. The scan hasn't caught up to reality.
-- **Screen saver / display sleep** — the AX server is suspended, so every managed window loses its AX element at once, yet `CGWindowList` still reports them (`onScreenIDs` overlaps `managedIDs`). Reaping here would discard every column assignment and width, since the next pass re-adds the windows as fresh columns on the active workspace.
+- **Screen saver / display sleep** — the AX server is suspended, so every managed window loses its AX element at once, yet `CGWindowList` still reports them.
+- **Another app's fullscreen Space** (e.g. mpv) — the off-Space windows lose their AX element and drop out of `stillAlive`, but `CGWindowList` still composites them; the fullscreen app itself stays alive. Reaping here would discard every column assignment and width, since the next pass re-adds the windows as fresh columns on the active workspace.
 
-Genuine closure removes windows from `CGWindowList`, so `managedIDs` and `onScreenIDs` stop overlapping and the guard returns false; reaping proceeds.
+Two or more AX-suspended windows trigger suppression; a lone one is left to the no-element backoff. When no managed window is alive but at least one is still composited, that straggler is treated as full suspension too — the scan is partially working but AX isn't.
 
-This guard is what protects the layout during the gap between the screen saver blanking the display — when AX elements vanish — and the `com.apple.screenIsLocked` notification arriving, which fires after the elements are already gone. The lock observers below extend the suppression across the rest of the locked interval.
+This guard is what protects the layout during the gap between the screen saver blanking the display — when AX elements vanish — and the `com.apple.screenIsLocked` notification arriving (which fires after the elements are already gone), and during an app's fullscreen Space, which fires no lock notification at all. The lock observers below extend the suppression across the rest of the locked interval.
 
 ### Lock/unlock
 

@@ -176,7 +176,7 @@ final class ReconcileTests: XCTestCase {
     XCTAssertEqual(reaped, hidden)
   }
 
-  // MARK: - massDisappearanceActive (screen saver / display sleep)
+  // MARK: - massDisappearanceActive (AX suspension)
 
   // Screen saver and display sleep suspend the AX server: every managed window loses
   // its AX element at once while CGWindowList still reports it. The pre-fix code only
@@ -200,10 +200,22 @@ final class ReconcileTests: XCTestCase {
     XCTAssertFalse(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [], onScreenIDs: [999, 1000]))
   }
 
-  // A single surviving managed window means this is not an en-masse AX-element loss.
+  // A single AX-suspended window among survivors is a transient no-element hiccup, not
+  // en-masse loss — handled by the no-element backoff, not by suppressing reaping.
   func testNoSuppressionWhenSomeManagedWindowsStillAlive() {
     let managed: Set<CGWindowID> = [213, 621, 699]
-    XCTAssertFalse(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [213], onScreenIDs: managed))
+    XCTAssertFalse(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [213, 621], onScreenIDs: managed))
+  }
+
+  // Another app entering a fullscreen Space (e.g. mpv) suspends AX for the off-Space
+  // windows: they lose their element and drop out of stillAlive while CGWindowList
+  // still composites them, but the fullscreen app itself stays alive. The pre-fix guard
+  // required stillAlive to be empty, so this reaped the suspended windows and re-added
+  // them as fresh columns on exit — discarding persisted column assignments and widths.
+  func testFullscreenAppSuppressesReapingWhileOthersLoseAXElements() {
+    let managed: Set<CGWindowID> = [213, 621, 699, 3630, 3655, 4381]
+    // 4381 (the fullscreen app) stays alive; the other five lose AX but stay in CG.
+    XCTAssertTrue(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [4381], onScreenIDs: managed))
   }
 
   func testNoSuppressionWhenNothingManaged() {
