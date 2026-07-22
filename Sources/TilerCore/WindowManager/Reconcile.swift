@@ -83,3 +83,18 @@ public func reconcilePlan(
     updatedResolveCounts: resolve, hasPendingResolve: hasPendingResolve,
     hasPendingNoElementResolve: hasPendingNoElementResolve)
 }
+
+/// True when every managed window vanished this pass from a system transition
+/// rather than genuine closure: CGWindowList returned nothing on screen
+/// (display-wake lag), or it still reports the managed windows (screen saver /
+/// display sleep suspended AX). Genuine closure drops windows from CGWindowList,
+/// so the managed/onScreen overlap disappears and this returns false.
+public func massDisappearanceActive(
+  managedIDs: Set<CGWindowID>,
+  stillAliveIDs: Set<CGWindowID>,
+  onScreenIDs: Set<CGWindowID>
+) -> Bool {
+  guard !managedIDs.isEmpty, stillAliveIDs.isEmpty else { return false }
+  if onScreenIDs.isEmpty { return true }
+  return !managedIDs.intersection(onScreenIDs).isEmpty
+}

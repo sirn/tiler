@@ -71,7 +71,7 @@ Behaviors that regress easily. Verify before merging a tiling change.
 - **Column operations** — left/right consume/expel (boundary conditions must be safe no-ops), toggle tabbed mode, column navigation, reordering, and resizing.
 - **Focus reliability** — navigation must target the correct screen even if the user clicked a window on another display beforehand.
 - **State restore across restarts** — terminate Tiler, restart it, and verify windows return to their correct persisted workspaces.
-- **Screen lock/unlock** — locking then unlocking must not reap every window or wipe workspace assignments.
+- **Screen lock/unlock** — locking then unlocking must not reap every window or wipe workspace assignments. This includes the screen saver / display sleep path, where the AX server is suspended (every window loses its element) while `CGWindowList` still reports the windows — distinct from a plain lock, and the case that originally regressed.
 - **Quit / crash** — on quit, windows from inactive workspaces must be gathered back onto the main screen; a crash must not strand them off-screen.
 
 ## Debugging

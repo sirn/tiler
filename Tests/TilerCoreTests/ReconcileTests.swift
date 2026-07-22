@@ -175,4 +175,47 @@ final class ReconcileTests: XCTestCase {
     }
     XCTAssertEqual(reaped, hidden)
   }
+
+  // MARK: - massDisappearanceActive (screen saver / display sleep)
+
+  // Screen saver and display sleep suspend the AX server: every managed window loses
+  // its AX element at once while CGWindowList still reports it. The pre-fix code only
+  // treated an empty CG scan as mass disappearance, so this case reaped the whole layout
+  // and the next pass re-added the windows as fresh columns — discarding persisted
+  // column assignments and widths. Pin the contract that this state suppresses reaping.
+  func testScreenSaverSuppressesReapingWhenManagedWindowsLoseAXElements() {
+    let managed: Set<CGWindowID> = [213, 621, 699, 1825, 1976, 3630, 3655]
+    // All managed windows remain in CGWindowList (on screen) but none are alive.
+    XCTAssertTrue(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [], onScreenIDs: managed))
+  }
+
+  func testDisplayWakeLagSuppressesReapingWhenCGScanIsEmpty() {
+    XCTAssertTrue(massDisappearanceActive(managedIDs: [213, 621, 699], stillAliveIDs: [], onScreenIDs: []))
+  }
+
+  // Genuine closure removes windows from CGWindowList: other apps may stay visible, but
+  // the managed ids no longer overlap onScreenIDs. Reaping must proceed normally.
+  func testGenuineClosureDoesNotSuppressReaping() {
+    let managed: Set<CGWindowID> = [213, 621]
+    XCTAssertFalse(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [], onScreenIDs: [999, 1000]))
+  }
+
+  // A single surviving managed window means this is not an en-masse AX-element loss.
+  func testNoSuppressionWhenSomeManagedWindowsStillAlive() {
+    let managed: Set<CGWindowID> = [213, 621, 699]
+    XCTAssertFalse(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [213], onScreenIDs: managed))
+  }
+
+  func testNoSuppressionWhenNothingManaged() {
+    XCTAssertFalse(massDisappearanceActive(managedIDs: [], stillAliveIDs: [], onScreenIDs: [999]))
+  }
+
+  // Partial mass loss: one managed window still in CG (AX suspended) while a sibling was
+  // genuinely closed (absent from CG). Suppressing protects the suspended window and only
+  // delays the closed sibling's reap until AX recovers — safer than destroying layout.
+  func testPartialAXLossStillSuppressesReaping() {
+    let managed: Set<CGWindowID> = [213, 621]
+    // 213 still in CG (AX suspended), 621 genuinely closed (gone from CG).
+    XCTAssertTrue(massDisappearanceActive(managedIDs: managed, stillAliveIDs: [], onScreenIDs: [213, 999]))
+  }
 }
