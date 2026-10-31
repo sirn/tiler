@@ -106,7 +106,7 @@ Ensure your changes do not break or degrade performance in these critical areas:
 
 ## Common pitfalls
 - **Direct AX/CG calls in Reducer**: Never call Accessibility or CoreGraphics APIs within Reducer code.
-- **WindowFilter dialog checks**: Checking for `AXStandardWindow` is insufficient. Many save/open dialogs report as standard windows but lack a close button; filter them by asserting the presence of `kAXCloseButtonAttribute`.
+- **WindowFilter dialog checks**: Checking for `AXStandardWindow` is insufficient. Many save/open dialogs report as standard windows but lack a close button; filter them by asserting the presence of `kAXCloseButtonAttribute`, and accept a chrome-less window only when it implements `AXFullScreen` (Adobe Illustrator).
 - **absorbMinWidth fullscreen guard**: When a window enters fullscreen, its width matches the screen. Prevent `absorbMinWidth` from locking column widths by skipping absorption when the observed width meets or exceeds the usable screen width (`observedWidth >= usableWidth`).
 - **wasNotTileableLastPass stickiness**: Fullscreen windows may disappear from `CGWindowList` for a few passes during screen transitions. The non-tileable set must remain sticky until the window returns or is fully reaped.
 - **Manual lockfile changes**: Do not edit lockfiles. Regenerate via `swift package update`.

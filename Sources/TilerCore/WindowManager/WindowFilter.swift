@@ -25,13 +25,11 @@ public enum WindowFilter {
       case "AXStandardWindow":
         // Standard windows should have a close button. macOS file dialogs (Open/Save
         // panels promoted to standalone windows in newer OS versions) report
-        // AXStandardWindow but lack a close button — reject them.
-        var closeButton: CFTypeRef?
-        guard
-          AXUIElementCopyAttributeValue(
-            element, kAXCloseButtonAttribute as CFString, &closeButton
-          ) == .success, closeButton != nil
-        else {
+        // AXStandardWindow but lack a close button — reject them. Apps that draw
+        // their own title bar (Adobe Illustrator) omit the button too, but they still
+        // implement AXFullScreen; panels do not, so that attribute separates a real
+        // document window from a promoted file dialog.
+        if !hasCloseButton(element), !supportsFullScreen(element) {
           return false
         }
       default:
@@ -74,6 +72,20 @@ public enum WindowFilter {
     else { return false }
 
     return true
+  }
+
+  private static func hasCloseButton(_ element: AXUIElement) -> Bool {
+    var closeButton: CFTypeRef?
+    return AXUIElementCopyAttributeValue(
+      element, kAXCloseButtonAttribute as CFString, &closeButton) == .success
+      && closeButton != nil
+  }
+
+  /// True when the window implements AXFullScreen at all, whatever its value.
+  private static func supportsFullScreen(_ element: AXUIElement) -> Bool {
+    var fullScreen: CFTypeRef?
+    return AXUIElementCopyAttributeValue(
+      element, "AXFullScreen" as CFString, &fullScreen) == .success
   }
 
   /// True when the window is in native macOS fullscreen (its own dedicated Space).

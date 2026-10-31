@@ -4,7 +4,7 @@ The reconcile loop is the shell's input side. It discovers windows from `CGWindo
 
 ## Window filtering
 
-`WindowFilter.isTileable(_:)` decides whether a discovered window enters the tile set. The check is a pipeline of guards applied in order: role, subrole with a close-button requirement, minimized, fullscreen, and owner activation policy. Each guard exists because a real app exposed a case the previous check admitted or rejected incorrectly.
+`WindowFilter.isTileable(_:)` decides whether a discovered window enters the tile set. The check is a pipeline of guards applied in order: role, subrole with a close-button requirement (native-fullscreen support stands in for it on `AXStandardWindow`), minimized, fullscreen, and owner activation policy. Each guard exists because a real app exposed a case the previous check admitted or rejected incorrectly.
 
 ### Checks, in order
 
@@ -14,7 +14,8 @@ The guards run in this order; the first failure rejects the window.
 public static func isTileable(_ element: AXUIElement) -> Bool {
   // 1. Role: AXWindow, or AXTextField (Emacs — see below)
   // 2. Subrole: reject AXSheet/AXDrawer/AXSystemDialog/AXFloatingWindow/Quick Look;
-  //    AXStandardWindow and all other subroles require a close button
+  //    AXStandardWindow requires a close button or AXFullScreen support;
+  //    all other subroles require a close button
   // 3. Not minimized
   // 4. Not fullscreen
   // 5. Owner app activation policy .regular
@@ -29,20 +30,20 @@ The role must be `kAXWindowRole`. `AXTextField` is also accepted: Emacs's NS por
 
 ### Subrole
 
-The subrole narrows which window types are accepted. A reject list excludes sheets and panels outright; every other subrole, including `AXStandardWindow`, must present a close button.
+The subrole narrows which window types are accepted. A reject list excludes sheets and panels outright; every other subrole must present a close button, except that `AXStandardWindow` also passes on native-fullscreen support.
 
 ```swift
 switch subroleStr {
 case "AXSheet", "AXDrawer", "AXSystemDialog", "AXFloatingWindow", "Quick Look":
   return false
 case "AXStandardWindow":
-  // require a close button
+  // close button, or native-fullscreen support
 default:
   // AXDialog, AXUnknown, etc. — require a close button
 }
 ```
 
-`AXSheet` is a save/open sheet attached to a window. `AXFloatingWindow` is a floating panel (color picker, Fonts panel). `Quick Look` is the subrole string Finder's space-bar preview uses. These are rejected outright. All other subroles, including `AXStandardWindow`, require a close button:
+`AXSheet` is a save/open sheet attached to a window. `AXFloatingWindow` is a floating panel (color picker, Fonts panel). `Quick Look` is the subrole string Finder's space-bar preview uses. These are rejected outright. All other subroles require a close button:
 
 ```swift
 guard
@@ -52,11 +53,15 @@ guard
 else { return false }
 ```
 
+`AXStandardWindow` takes the close button or, failing that, an implemented `AXFullScreen` attribute (see below).
+
 ### The close-button rule
 
 The close-button check is the durable rule because macOS promotes more window types to `AXStandardWindow` over time than the subrole string can enumerate.
 
 macOS Open/Save panels promoted to standalone windows report `AXStandardWindow` but lack a close button; tiling them would let `closeWindow` fail to close them. Chromium extension popups have `AXUnknown` subrole and no window buttons but pass the default case. The durable rule is the close-button check — macOS promotes more windows to `AXStandardWindow` over time, so checking for chrome is more robust than checking the subrole string.
+
+Adobe Illustrator draws its own title bar and never exports an `AXCloseButton`, yet its windows are ordinary document windows. `WindowFilter` accepts that case when the window implements `AXFullScreen`: file dialogs and panels do not implement it, so it still separates a real document window from a promoted panel.
 
 `AXDialog` is tileable only with a close button: chrome-bearing dialogs are legitimate; chrome-less popups such as the Telegram attachment menu are filtered out.
 
