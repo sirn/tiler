@@ -37,7 +37,7 @@ final class ReducerTests: XCTestCase {
         makeWindowNode(id: UInt32(i * 100 + j + 1), title: "win\(i)-\(j)")
       }
       return Column(
-        windows: wins, focusedWindowIndex: 0, widthFraction: 1.0 / CGFloat(windowCounts.count))
+        windows: wins, focusedWindowIndex: 0, width: .proportion(1.0 / CGFloat(windowCounts.count)))
     }
     let ws = Workspace(id: 1, columns: cols, focusedColumnIndex: focus)
     let screen = ScreenState(info: makeScreen(), workspaces: [1: ws], activeWorkspaceID: 1)
@@ -154,7 +154,7 @@ final class ReducerTests: XCTestCase {
     let windowCol = Column(
       windows: [makeWindowNode(id: 100)],
       focusedWindowIndex: 0,
-      widthFraction: 0.5)
+      width: .proportion(0.5))
     let ws = Workspace(id: 1, columns: [windowCol], focusedColumnIndex: 0)
     let screen = ScreenState(info: makeScreen(), workspaces: [1: ws], activeWorkspaceID: 1)
     var state = TilerState(screens: [1: screen])
@@ -207,7 +207,7 @@ final class ReducerTests: XCTestCase {
         makeWindowNode(id: 101, title: "win1"),
       ],
       focusedWindowIndex: 0,
-      widthFraction: 0.5)
+      width: .proportion(0.5))
     let ws = Workspace(id: 1, columns: [multiWinCol], focusedColumnIndex: 0)
     let screen = ScreenState(info: makeScreen(), workspaces: [1: ws], activeWorkspaceID: 1)
     var state = TilerState(screens: [1: screen])

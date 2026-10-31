@@ -54,10 +54,10 @@ When `true`, `focus_column_left` / `focus_column_right` wrap within the active s
 
 ### `default_column_width`
 
-- Type: number (fraction of usable width, `0.0`–`1.0`)
+- Type: number (a proportion, `0.0`–`1.0`) or string (`"900px"`)
 - Default: `0.5`
 
-Width fraction applied to newly created columns.
+Width applied to newly created columns. A proportion is a share of the slot width, which is the usable width plus one gap, and each column keeps one gap for itself. Proportions that add up to `1.0` therefore fill the screen exactly. A `"<points>px"` string gives a fixed width that no viewport size changes.
 
 ### `center_focused_column`
 
@@ -158,7 +158,7 @@ Bundle identifier pattern. `*` matches any sequence of characters; matching is c
 
 ### `column_width`
 
-- Type: number (fraction of usable width, `0.0`–`1.0`)
+- Type: number (a proportion, `0.0`–`1.0`) or string (`"900px"`)
 - Optional.
 
-Preferred width fraction for windows of matching apps when placed in a new column.
+Preferred width for windows of matching apps when placed in a new column. Takes a proportion or a fixed width, like `default_column_width`.

@@ -41,20 +41,55 @@ final class LayoutGeometryTests: XCTestCase {
     XCTAssertLessThanOrEqual(cols[1].right - offset, U + 0.01)
   }
 
-  // Baseline: with measuredMinWidth == nil, columns are absolute proportions of U
-  // 3 columns of 0.5 each: width=500 (50% of U=1000), overflow the viewport
-  func testMinWidthNilBaselineUnchanged() {
+  // Baseline: a proportion is a share of the slot width (U + gap = 1008), minus one
+  // gap per column. 3 columns of 0.5 each: 496 wide, lefts 0/504/1008, overflow
+  func testMinWidthNilBaselineSharesGapSpace() {
     let screen = makeScreen(width: 1000)
     let gaps = makeGaps(column: 8)
     let ws = makeWorkspaceWithMinWidths(
       fractions: [0.5, 0.5, 0.5], minWidths: [nil, nil, nil], focus: 0)
     let cols = LayoutGeometry.columns(ws, screen, gaps)
-    XCTAssertEqual(cols[0].width, 500, accuracy: 1.0)
-    XCTAssertEqual(cols[1].width, 500, accuracy: 1.0)
-    XCTAssertEqual(cols[2].width, 500, accuracy: 1.0)
+    XCTAssertEqual(cols[0].width, 496, accuracy: 1.0)
+    XCTAssertEqual(cols[1].width, 496, accuracy: 1.0)
+    XCTAssertEqual(cols[2].width, 496, accuracy: 1.0)
     XCTAssertEqual(cols[0].left, 0, accuracy: 0.01)
-    XCTAssertEqual(cols[1].left, 508, accuracy: 1.0)  // 500 + 8
-    XCTAssertEqual(cols[2].left, 1016, accuracy: 1.0)  // 500 + 8 + 500 + 8
+    XCTAssertEqual(cols[1].left, 504, accuracy: 1.0)  // 496 + 8
+    XCTAssertEqual(cols[2].left, 1008, accuracy: 1.0)  // 496 + 8 + 496 + 8
+  }
+
+  // Fractions that add up to 1 fill the usable width exactly, with no overshoot.
+  func testFractionsSummingToOneFillUsableWidth() {
+    let screen = makeScreen(width: 1000)
+    let gaps = makeGaps(column: 8)
+    let ws = makeWorkspace(fractions: [0.5, 0.5], focus: 0)
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    XCTAssertEqual(
+      LayoutGeometry.contentWidth(cols), LayoutGeometry.usableWidth(screen, gaps), accuracy: 0.01)
+  }
+
+  // A fixed width is absolute: the column keeps it whatever the viewport is, and the
+  // proportion column after it starts after the fixed column and one gap.
+  func testFixedWidthColumnKeepsItsWidth() {
+    let screen = makeScreen(width: 1000)
+    let gaps = makeGaps(column: 8)
+    let ws = Workspace(
+      id: 1,
+      columns: [Column(width: .fixed(300)), Column(width: .proportion(0.5))],
+      focusedColumnIndex: 0)
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    XCTAssertEqual(cols[0].width, 300, accuracy: 0.01)
+    XCTAssertEqual(cols[1].left, 308, accuracy: 0.01)
+    XCTAssertEqual(cols[1].width, 496, accuracy: 1.0)
+  }
+
+  // Outer gaps, column gaps and column widths add up to the full screen width.
+  func testGapsAndWidthsSumToScreenWidth() {
+    let screen = makeScreen(width: 1000)
+    let gaps = GapConfig(outerGaps: 8, innerGaps: 6, columnGaps: 8)
+    let ws = makeWorkspace(fractions: [0.5, 0.5], focus: 0)
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    let total = 2 * gaps.outerGaps + cols.reduce(0) { $0 + $1.width } + gaps.columnGaps
+    XCTAssertEqual(total, screen.visibleFrame.width, accuracy: 0.01)
   }
 
   // Adjacent-pair no-overlap: cols[i].right + columnGaps <= cols[i+1].left for all i

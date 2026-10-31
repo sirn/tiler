@@ -31,7 +31,7 @@ extension Workspace {
         cols[focusedColumnIndex].focusedWindowIndex = cols[focusedColumnIndex].windows.count - 1
       }
       let newCol = Column(
-        windows: [win], focusedWindowIndex: 0, mode: col.mode, widthFraction: col.widthFraction)
+        windows: [win], focusedWindowIndex: 0, mode: col.mode, width: col.width)
       let insertAt = direction == .left ? focusedColumnIndex : focusedColumnIndex + 1
       cols.insert(newCol, at: insertAt)
       columns = cols

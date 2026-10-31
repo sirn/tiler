@@ -14,7 +14,7 @@ Terms used throughout these docs:
 
 - **Workspace** — one of up to 9 independent layouts. Each screen has one active workspace; switching parks the previous one off-screen and shows the new one.
 - **Strip / viewport** — the strip is the total width of every column in a workspace laid end to end. Only part of it fits on screen at once; that visible part is the viewport. Moving focus to a column outside the viewport scrolls it into view (computed by `ViewportCalc`).
-- **Column** — a narrow vertical band within a strip containing one or more windows. Columns are laid out left to right across a workspace. A column has a width fraction of the usable screen and a mode: **stack** (windows tiled vertically within the column) or **tab** (one window visible).
+- **Column** — a narrow vertical band within a strip containing one or more windows. Columns are laid out left to right across a workspace. A column has a width — a proportion of the slot width, or a fixed point width — and a mode: **stack** (windows tiled vertically within the column) or **tab** (one window visible).
 - **Window node (tile)** — a managed window inside a column. Tracked by `CGWindowID`, acted on through `AXUIElement` (see [architecture/04-reconcile.md](architecture/04-reconcile.md)).
 - **GroupKey** — a stable tile identity that survives native tab swaps, independent of the current `CGWindowID` (see [architecture/01-state.md](architecture/01-state.md#groupkey)).
 - **Focus** — the focused column and the focused window within it. Navigation actions move focus (see [topics/focus.md](topics/focus.md)).

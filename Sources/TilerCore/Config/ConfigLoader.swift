@@ -81,6 +81,18 @@ public class ConfigLoader {
 
   // MARK: - Parsing
 
+  /// A column width is either a number (a proportion of the shared space, clamped
+  /// like Niri's preset) or a string such as `"900px"` (a fixed width in points).
+  private func parseColumnWidth(_ value: any TOMLValueConvertible) -> ColumnWidth? {
+    if let proportion = value.double ?? value.int.map(Double.init) {
+      return .proportion(min(max(CGFloat(proportion), 0.1), 1.0))
+    }
+    if let text = value.string, let points = ColumnWidth.parseFixed(text) {
+      return .fixed(points)
+    }
+    return nil
+  }
+
   private func parseConfig(from toml: TOMLTable) -> Config {
     var config = Config.defaults
 
@@ -102,8 +114,8 @@ public class ConfigLoader {
 
     // [layout]
     if let layout = toml["layout"]?.table {
-      if let dcw = layout["default_column_width"]?.double {
-        config.layout.defaultColumnWidth = min(max(CGFloat(dcw), 0.1), 1.0)
+      if let dcw = layout["default_column_width"] {
+        config.layout.defaultColumnWidth = parseColumnWidth(dcw) ?? config.layout.defaultColumnWidth
       }
       if let cfc = layout["center_focused_column"]?.string,
         let mode = CenterFocusedColumn(rawValue: cfc)
@@ -139,7 +151,7 @@ public class ConfigLoader {
           let app = table["app"]?.string
         else { continue }
         let action = table["action"]?.string
-        let columnWidth = table["column_width"]?.double.map { CGFloat($0) }
+        let columnWidth = table["column_width"].flatMap { parseColumnWidth($0) }
         config.appRules.append(AppRuleConfig(app: app, action: action, columnWidth: columnWidth))
       }
     }

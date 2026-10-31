@@ -83,12 +83,12 @@ public enum CenterFocusedColumn: String, Codable {
 
 /// [layout] section — default column behaviour.
 public struct LayoutConfig: Codable {
-  public var defaultColumnWidth: CGFloat
+  public var defaultColumnWidth: ColumnWidth
   public var centerFocusedColumn: CenterFocusedColumn
   public var alwaysCenterSingleColumn: Bool
 
   public init(
-    defaultColumnWidth: CGFloat = 0.5,
+    defaultColumnWidth: ColumnWidth = .proportion(0.5),
     centerFocusedColumn: CenterFocusedColumn = .never,
     alwaysCenterSingleColumn: Bool = false
   ) {
@@ -140,9 +140,9 @@ public struct KeybindConfig: Decodable {
 public struct AppRuleConfig: Decodable {
   public var app: String
   public var action: String?
-  public var columnWidth: CGFloat?
+  public var columnWidth: ColumnWidth?
 
-  public init(app: String, action: String? = nil, columnWidth: CGFloat? = nil) {
+  public init(app: String, action: String? = nil, columnWidth: ColumnWidth? = nil) {
     self.app = app
     self.action = action
     self.columnWidth = columnWidth

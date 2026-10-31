@@ -4,7 +4,7 @@ import Foundation
 struct PersistedColumn: Codable {
   var windowIDs: [CGWindowID]
   var mode: String
-  var widthFraction: CGFloat
+  var width: ColumnWidth
   var focusedWindowIndex: Int
 }
 
@@ -34,7 +34,7 @@ extension PersistedState {
             PersistedColumn(
               windowIDs: col.windows.map { $0.id },
               mode: col.mode == .tab ? "tab" : "stack",
-              widthFraction: col.widthFraction,
+              width: col.width,
               focusedWindowIndex: col.focusedWindowIndex
             )
           }

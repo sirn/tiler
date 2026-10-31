@@ -14,7 +14,7 @@ func makeGaps(column: CGFloat = 8) -> GapConfig {
 }
 
 func makeWorkspace(fractions: [CGFloat], focus: Int) -> Workspace {
-  let cols = fractions.map { Column(widthFraction: $0) }
+  let cols = fractions.map { Column(width: .proportion($0)) }
   return Workspace(id: 1, columns: cols, focusedColumnIndex: focus)
 }
 
@@ -22,7 +22,7 @@ func makeWorkspaceWithMinWidths(fractions: [CGFloat], minWidths: [CGFloat?], foc
   -> Workspace
 {
   let cols = zip(fractions, minWidths).map { (frac, minW) in
-    Column(widthFraction: frac, measuredMinWidth: minW)
+    Column(width: .proportion(frac), measuredMinWidth: minW)
   }
   return Workspace(id: 1, columns: cols, focusedColumnIndex: focus)
 }

@@ -9,7 +9,7 @@ TilerState
    └─ workspaces: [WorkspaceID: Workspace]
       └─ focusedColumnIndex, scrollOffset
       └─ columns: [Column]
-         └─ mode (.stack | .tab), widthFraction, focusedWindowIndex,
+         └─ mode (.stack | .tab), width (.proportion | .fixed), focusedWindowIndex,
             measuredMinWidth?, measuredMinHeight?
          └─ windows: [WindowNode]
             └─ id: CGWindowID, groupKey: GroupKey, pid, title

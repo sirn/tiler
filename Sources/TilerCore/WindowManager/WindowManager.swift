@@ -373,7 +373,7 @@ public class WindowManager {
           Column(
             windows: [window],
             focusedWindowIndex: 0,
-            widthFraction: layoutConfig.defaultColumnWidth
+            width: layoutConfig.defaultColumnWidth
           ))
       }
       if ws1.focusedColumnIndex >= ws1.columns.count {
@@ -407,7 +407,7 @@ public class WindowManager {
           windows: liveWindows,
           focusedWindowIndex: clampedIdx,
           mode: mode,
-          widthFraction: persistedCol.widthFraction
+          width: persistedCol.width
         ))
       placed.formUnion(liveWindows.map { $0.id })
     }
@@ -455,7 +455,7 @@ public class WindowManager {
                   target.columns = [
                     Column(
                       windows: [window], focusedWindowIndex: 0,
-                      widthFraction: layoutConfig.defaultColumnWidth)
+                      width: layoutConfig.defaultColumnWidth)
                   ]
                   target.focusedColumnIndex = 0
                 } else {
@@ -496,9 +496,9 @@ public class WindowManager {
     matchingAppRules(pid: pid).contains { $0.action == "float" }
   }
 
-  /// Returns the preferred column width fraction from the first matching app
-  /// rule that specifies column_width, or nil if none do.
-  private func appRuleColumnWidth(pid: pid_t) -> CGFloat? {
+  /// Returns the preferred column width from the first matching app rule that
+  /// specifies column_width, or nil if none do.
+  private func appRuleColumnWidth(pid: pid_t) -> ColumnWidth? {
     matchingAppRules(pid: pid).compactMap { $0.columnWidth }.first
   }
 
@@ -1404,20 +1404,13 @@ public class WindowManager {
       }
     }
 
-    // An app rule may pin a preferred column width fraction; otherwise preserve
-    // the window's current width as a fraction of usable viewport width.
-    let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
-    let widthFraction: CGFloat
-    if let ruleWidth = appRuleColumnWidth(pid: pid) {
-      widthFraction = min(max(ruleWidth, 0.1), 1.0)
-    } else if usableWidth > 0 {
-      widthFraction = min(max(bounds.width / usableWidth, 0.1), 1.0)
-    } else {
-      widthFraction = layoutConfig.defaultColumnWidth
-    }
+    // The column takes the app rule's width, else the configured default. Like Niri,
+    // a new column is never sized from the window's current size: adopting it would
+    // make the fractions depend on whatever the app happened to open with.
+    let columnWidth = appRuleColumnWidth(pid: pid) ?? layoutConfig.defaultColumnWidth
 
     let column = Column(
-      windows: [node], focusedWindowIndex: 0, widthFraction: widthFraction)
+      windows: [node], focusedWindowIndex: 0, width: columnWidth)
 
     if workspace.columns.isEmpty {
       workspace.columns = [column]
@@ -2441,7 +2434,7 @@ public class WindowManager {
       guard let ws else { continue }
       for (ci, col) in ws.columns.enumerated() {
         tiler_log(
-          "[diagnostics]   col[\(ci)] mode=\(col.mode) wf=\(col.widthFraction) count=\(col.windows.count)"
+          "[diagnostics]   col[\(ci)] mode=\(col.mode) width=\(col.width) count=\(col.windows.count)"
         )
         for node in col.windows {
           let target = appliedWindows[node.groupKey]?.frame

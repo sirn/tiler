@@ -15,7 +15,13 @@ enum Reducer {
     _ col: inout Column, by delta: CGFloat, min minWidth: CGFloat = columnWidthMin,
     max maxWidth: CGFloat = columnWidthMax
   ) {
-    col.widthFraction = min(max(col.widthFraction + delta, minWidth), maxWidth)
+    switch col.width {
+    case .proportion(let proportion):
+      col.width = .proportion(min(max(proportion + delta, minWidth), maxWidth))
+    case .fixed(let points):
+      // A fixed width has no proportion to step, so scale it by the same fraction.
+      col.width = .fixed(max(1, (points * (1 + delta)).rounded()))
+    }
     col.measuredMinWidth = nil
   }
 
@@ -212,7 +218,7 @@ enum Reducer {
         screenState.workspaces[currentWSID] = sourceWorkspace
 
         let newCol = Column(
-          windows: [window], focusedWindowIndex: 0, widthFraction: col.widthFraction)
+          windows: [window], focusedWindowIndex: 0, width: col.width)
         if targetWorkspace.columns.isEmpty {
           targetWorkspace.columns = [newCol]
           targetWorkspace.focusedColumnIndex = 0
@@ -335,7 +341,7 @@ enum Reducer {
     else { return [] }
 
     var extractedWindow: WindowNode?
-    var extractedWidthFraction: CGFloat = 0.5
+    var extractedWidth: ColumnWidth = .proportion(0.5)
     let sourceEffects = state.withActiveScreen(env: env) { _, screenState in
       let currentWSID = screenState.activeWorkspaceID
       guard var sourceWorkspace = screenState.workspaces[currentWSID],
@@ -349,7 +355,7 @@ enum Reducer {
 
       let window = col.windows.remove(at: winIdx)
       extractedWindow = window
-      extractedWidthFraction = col.widthFraction
+      extractedWidth = col.width
 
       if col.windows.isEmpty {
         sourceWorkspace.columns.remove(at: colIdx)
@@ -377,7 +383,7 @@ enum Reducer {
       guard var targetWorkspace = targetScreen.workspaces[targetWSID] else { return [] }
 
       let newCol = Column(
-        windows: [window], focusedWindowIndex: 0, widthFraction: extractedWidthFraction)
+        windows: [window], focusedWindowIndex: 0, width: extractedWidth)
       if targetWorkspace.columns.isEmpty {
         targetWorkspace.columns = [newCol]
         targetWorkspace.focusedColumnIndex = 0

@@ -17,7 +17,8 @@ focus_column_wrap = false
 # Layout
 
 [layout]
-# Width fraction for newly-created columns (0.0–1.0 of usable width).
+# Width for newly-created columns: a proportion 0.0–1.0, or a fixed width such as
+# "900px". Proportions that add up to 1.0 fill the screen exactly.
 default_column_width = 0.5
 # When to scroll the viewport so the focused column is centred:
 #   "never"        scroll it fully into view (default)
@@ -141,7 +142,8 @@ action = "consume_or_expel_right"
 # wildcard patterns (`*` matches any sequence of characters, case-insensitive).
 #
 # `action` can be "float" to exclude the app from tiling.
-# `column_width` sets a preferred width fraction for windows of that app.
+# `column_width` sets a preferred width for windows of that app: a proportion or a
+# fixed width, like `default_column_width`.
 
 # [[app_rule]]
 # app = "com.apple.finder"

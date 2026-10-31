@@ -80,7 +80,7 @@ final class ColumnOpsTests: XCTestCase {
       id: 1,
       columns: [
         Column(
-          windows: [WindowNode(id: 100, groupKey: g, pid: 7, title: "old")], widthFraction: 0.5)
+          windows: [WindowNode(id: 100, groupKey: g, pid: 7, title: "old")], width: .proportion(0.5))
       ])
     XCTAssertTrue(ws.swapBackingID(from: 100, to: 200, title: "new"))
     let node = ws.columns[0].windows[0]
@@ -98,7 +98,7 @@ final class ColumnOpsTests: XCTestCase {
         windows: [
           WindowNode(id: 10, groupKey: gA, pid: 1, title: "a"),
           WindowNode(id: 11, groupKey: gB, pid: 1, title: "b"),
-        ], focusedWindowIndex: 1, widthFraction: 0.5)
+        ], focusedWindowIndex: 1, width: .proportion(0.5))
     ]
     var ws = Workspace(id: 1, columns: columns)
     XCTAssertTrue(ws.swapBackingID(from: 11, to: 99, title: "b2"))
@@ -115,7 +115,7 @@ final class ColumnOpsTests: XCTestCase {
     let columns = [
       Column(
         windows: [WindowNode(id: 100, groupKey: WindowNode.GroupKey(value: 1), pid: 1, title: "x")],
-        widthFraction: 0.5)
+        width: .proportion(0.5))
     ]
     var ws = Workspace(id: 1, columns: columns)
     XCTAssertFalse(ws.swapBackingID(from: 999, to: 200, title: "y"))

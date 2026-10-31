@@ -49,9 +49,8 @@ public enum LayoutEngine {
       "[LayoutEngine]   usableRect: x=\(String(format: "%.1f", usableRect.minX)) y=\(String(format: "%.1f", usableRect.minY)) w=\(String(format: "%.1f", usableRect.width)) h=\(String(format: "%.1f", usableRect.height))"
     )
     for i in cols.indices {
-      let wf = workspace.columns[i].widthFraction
       tiler_debug(
-        "[LayoutEngine]   col[\(i)] left=\(String(format: "%.1f", cols[i].left)) widthFraction=\(String(format: "%.3f", wf)) width=\(String(format: "%.1f", cols[i].width))"
+        "[LayoutEngine]   col[\(i)] left=\(String(format: "%.1f", cols[i].left)) width=\(String(format: "%.1f", cols[i].width))"
       )
     }
 
