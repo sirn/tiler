@@ -48,14 +48,14 @@ public class AppObserver {
     // the main run loop; events arriving before subscription completes are
     // recovered by the periodic CGWindowList reconcile. The run-loop source is
     // attached below on the main thread so deinit can remove it deterministically.
-    // Strong-capture self so it outlives subscription. selfPtr is an unretained
-    // refcon; a [weak self] guard only checks liveness at entry, so if self deinits
-    // mid-loop AXObserverAddNotification would store a dangling refcon and crash
-    // when an event later dereferences it.
-    AppObserver.subscriptionQueue.async { [self] in
+    // The closure reads self.pid, which captures self strongly, so self outlives
+    // subscription. selfPtr is an unretained refcon; a [weak self] guard only
+    // checks liveness at entry, so if self deinited mid-loop AXObserverAddNotification
+    // would store a dangling refcon and crash when an event later dereferences it.
+    AppObserver.subscriptionQueue.async {
       for notification in notifications {
         let err = AXObserverAddNotification(
-          observer, AXUIElementCreateApplication(pid), notification, selfPtr)
+          observer, AXUIElementCreateApplication(self.pid), notification, selfPtr)
         if err != .success {
           if criticalNotifications.contains(notification) {
             tiler_log(
