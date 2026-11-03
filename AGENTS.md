@@ -10,7 +10,7 @@ Always run the following commands to build and verify the project:
 - Release + app bundle: `make app` (or `make app SIGN_IDENTITY="..."` for custom codesigning)
 - Clean: `make clean`
 
-All 66 unit tests operate on pure data structures, requiring no accessibility (AX), CoreGraphics (CG), or screen access. Running `swift test` is the gating check; all tests must pass before making a commit.
+All unit tests operate on pure data structures, requiring no accessibility (AX), CoreGraphics (CG), or screen access. Running `swift test` is the gating check; all tests must pass before making a commit.
 
 ## Architecture constraints
 Tiler implements a pure Elm-like architecture (State -> Actions -> Reducer -> Effects -> Shell).
