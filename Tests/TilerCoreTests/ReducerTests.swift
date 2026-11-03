@@ -235,6 +235,24 @@ final class ReducerTests: XCTestCase {
     assertProportion(focusedWidth(state), 0.45)
   }
 
+  func testIncreaseColumnWidthAboveMaxDoesNotShrink() {
+    var state = makeWindowState(fractions: [0.9], focus: 0)
+    _ = Reducer.apply(.increaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.9)
+  }
+
+  func testDecreaseColumnWidthBelowMinDoesNotGrow() {
+    var state = makeWindowState(fractions: [0.1], focus: 0)
+    _ = Reducer.apply(.decreaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.1)
+  }
+
+  func testIncreaseColumnWidthBelowMinGrowsToMin() {
+    var state = makeWindowState(fractions: [0.1], focus: 0)
+    _ = Reducer.apply(.increaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.2)
+  }
+
   // MARK: - Consume / expel
 
   func testConsumeOrExpelLeftExpelsMultiWindowColumn() {

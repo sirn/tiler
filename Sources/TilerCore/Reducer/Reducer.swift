@@ -26,7 +26,10 @@ enum Reducer {
         delta > 0
         ? ((steps + 1e-6).rounded(.down) + 1) * step
         : ((steps - 1e-6).rounded(.up) - 1) * step
-      col.width = .proportion(min(max(snapped, minWidth), maxWidth))
+      // A proportion from the config or a window can lie outside the resize limits;
+      // the clamp must not move it against the direction of the resize.
+      let clamped = min(max(snapped, minWidth), maxWidth)
+      col.width = .proportion(delta > 0 ? max(clamped, proportion) : min(clamped, proportion))
     case .fixed(let points):
       // A fixed width has no proportion to step, so scale it by the same fraction.
       col.width = .fixed(max(1, (points * (1 + delta)).rounded()))
