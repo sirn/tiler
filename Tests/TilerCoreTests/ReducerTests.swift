@@ -198,6 +198,43 @@ final class ReducerTests: XCTestCase {
     XCTAssertEqual(state.screens[1]?.workspaces[1]?.columns.count, 1)
   }
 
+  // MARK: - Column width
+
+  func focusedWidth(_ state: TilerState) -> ColumnWidth? {
+    guard let ws = state.screens[1]?.workspaces[1] else { return nil }
+    return ws.columns[ws.focusedColumnIndex].width
+  }
+
+  func assertProportion(
+    _ width: ColumnWidth?, _ expected: CGFloat, file: StaticString = #filePath, line: UInt = #line
+  ) {
+    guard case .proportion(let p) = width else {
+      return XCTFail("expected a proportion, got \(String(describing: width))", file: file, line: line)
+    }
+    XCTAssertEqual(p, expected, accuracy: 1e-9, file: file, line: line)
+  }
+
+  func testIncreaseColumnWidthSnapsToNextStep() {
+    var state = makeWindowState(fractions: [0.43], focus: 0)
+    _ = Reducer.apply(.increaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.45)
+  }
+
+  func testDecreaseColumnWidthSnapsToPreviousStep() {
+    var state = makeWindowState(fractions: [0.43], focus: 0)
+    _ = Reducer.apply(.decreaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.40)
+  }
+
+  func testColumnWidthOnStepMovesOneStep() {
+    var state = makeWindowState(fractions: [0.5], focus: 0)
+    _ = Reducer.apply(.increaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.55)
+    _ = Reducer.apply(.decreaseColumnWidth, to: &state, env: env())
+    _ = Reducer.apply(.decreaseColumnWidth, to: &state, env: env())
+    assertProportion(focusedWidth(state), 0.45)
+  }
+
   // MARK: - Consume / expel
 
   func testConsumeOrExpelLeftExpelsMultiWindowColumn() {

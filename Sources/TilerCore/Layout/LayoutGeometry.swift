@@ -11,6 +11,16 @@ public enum LayoutGeometry {
     max(0, screen.visibleFrame.width - 2 * gaps.outerGaps)
   }
 
+  /// Returns the proportion that `columns` resolves to `width`, or nil when the
+  /// screen has no usable width.
+  public static func proportion(forWidth width: CGFloat, _ screen: ScreenInfo, _ gaps: GapConfig)
+    -> CGFloat?
+  {
+    let U = usableWidth(screen, gaps)
+    guard U > 0 else { return nil }
+    return (width + gaps.columnGaps) / (U + gaps.columnGaps)
+  }
+
   public static func columns(_ workspace: Workspace, _ screen: ScreenInfo, _ gaps: GapConfig)
     -> [ColumnLayout]
   {

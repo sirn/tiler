@@ -17,7 +17,16 @@ enum Reducer {
   ) {
     switch col.width {
     case .proportion(let proportion):
-      col.width = .proportion(min(max(proportion + delta, minWidth), maxWidth))
+      // Snap to the next step rather than add the delta, so a width adopted from
+      // a window lands on the step grid. The tolerance keeps a proportion already
+      // on the grid from skipping a step because of float error.
+      let step = abs(delta)
+      let steps = proportion / step
+      let snapped =
+        delta > 0
+        ? ((steps + 1e-6).rounded(.down) + 1) * step
+        : ((steps - 1e-6).rounded(.up) - 1) * step
+      col.width = .proportion(min(max(snapped, minWidth), maxWidth))
     case .fixed(let points):
       // A fixed width has no proportion to step, so scale it by the same fraction.
       col.width = .fixed(max(1, (points * (1 + delta)).rounded()))

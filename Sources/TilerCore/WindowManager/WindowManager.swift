@@ -1404,10 +1404,19 @@ public class WindowManager {
       }
     }
 
-    // The column takes the app rule's width, else the configured default. Like Niri,
-    // a new column is never sized from the window's current size: adopting it would
-    // make the fractions depend on whatever the app happened to open with.
-    let columnWidth = appRuleColumnWidth(pid: pid) ?? layoutConfig.defaultColumnWidth
+    // An app rule may pin the column width; otherwise the column keeps the window's
+    // current width rather than the configured default, so opening a window does not
+    // resize it. The width stays a proportion so that resizing steps it.
+    let columnWidth: ColumnWidth
+    if let ruleWidth = appRuleColumnWidth(pid: pid) {
+      columnWidth = ruleWidth
+    } else if let proportion = LayoutGeometry.proportion(
+      forWidth: bounds.width, screenState.info, gaps)
+    {
+      columnWidth = .proportion(min(max(proportion, 0.1), 1.0))
+    } else {
+      columnWidth = layoutConfig.defaultColumnWidth
+    }
 
     let column = Column(
       windows: [node], focusedWindowIndex: 0, width: columnWidth)

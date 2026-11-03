@@ -17,7 +17,8 @@ focus_column_wrap = false
 # Layout
 
 [layout]
-# Width for newly-created columns: a proportion 0.0–1.0, or a fixed width such as
+# Width for newly-created columns when the window's own width is not known (a newly
+# opened window keeps its width): a proportion 0.0–1.0, or a fixed width such as
 # "900px". Proportions that add up to 1.0 fill the screen exactly.
 default_column_width = 0.5
 # When to scroll the viewport so the focused column is centred:

@@ -82,6 +82,18 @@ final class LayoutGeometryTests: XCTestCase {
     XCTAssertEqual(cols[1].width, 496, accuracy: 1.0)
   }
 
+  // A window's width converted to a proportion resolves back to the same width.
+  func testProportionForWidthResolvesToSameWidth() {
+    let screen = makeScreen(width: 1000)
+    let gaps = makeGaps(column: 8)
+    let proportion = LayoutGeometry.proportion(forWidth: 700, screen, gaps)
+    XCTAssertNotNil(proportion)
+    let ws = Workspace(
+      id: 1, columns: [Column(width: .proportion(proportion ?? 0))], focusedColumnIndex: 0)
+    let cols = LayoutGeometry.columns(ws, screen, gaps)
+    XCTAssertEqual(cols[0].width, 700, accuracy: 1.0)
+  }
+
   // Outer gaps, column gaps and column widths add up to the full screen width.
   func testGapsAndWidthsSumToScreenWidth() {
     let screen = makeScreen(width: 1000)
