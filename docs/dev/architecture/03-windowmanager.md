@@ -152,12 +152,12 @@ When a window enters native fullscreen, its width becomes the full screen width.
 
 ### Guard 1: skip absorption at screen size
 
-`absorbMinWidth` refuses values at or above the usable screen width, which only occur during a fullscreen transition.
+`absorbMinWidth` refuses values at or above the usable screen width, which only occur during a fullscreen transition. `absorbMinHeight` applies the same guard to the usable height; both share `absorbMinSize`.
 
 ```swift
-let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
-guard observedWidth < usableWidth else {
-  tiler_debug("absorbMinWidth: skipping \(observedWidth) >= usable \(usableWidth) (likely fullscreen transition)")
+let usableSize = usable(screenState.info)
+guard observed < usableSize else {
+  tiler_debug("absorb \(label): skipping \(observed) >= usable \(usableSize) for wid=\(wid) (likely fullscreen transition)")
   return
 }
 ```

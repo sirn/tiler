@@ -1353,37 +1353,13 @@ public class WindowManager {
       y: screenHeight - bounds.minY - bounds.height,
       width: bounds.width,
       height: bounds.height)
-    // Check focused column first
+    // Check the focused column first, so a new tab joins the group the user is in
+    // when several same-PID columns share a frame.
     let focusedIdx = workspace.focusedColumnIndex
-    if focusedIdx < workspace.columns.count {
-      let col = workspace.columns[focusedIdx]
-      if let firstWin = col.windows.first(where: { $0.pid == pid }) {
-        let existingFrame: NSRect?
-        if let element = windowStore.element(for: firstWin.id) {
-          existingFrame = AXWindowBridge.currentFrame(for: element)
-        } else if let gk = groupKey(forID: firstWin.id), let applied = appliedWindows[gk]?.frame {
-          existingFrame = applied
-        } else {
-          existingFrame = nil
-        }
-        if let existingFrame = existingFrame,
-          AXWindowBridge.framesMatch(cocoaBounds, existingFrame, tolerance: 10)
-        {
-          workspace.columns[focusedIdx].windows.append(node)
-          workspace.columns[focusedIdx].measuredMinWidth = nil
-          workspace.columns[focusedIdx].measuredMinHeight = nil
-          if workspace.columns[focusedIdx].mode == .stack {
-            workspace.columns[focusedIdx].mode = .tab
-          }
-          screenState.workspaces[wsID] = workspace
-          state.screens[screenID] = screenState
-          tiler_debug("Tab-merged window \(windowID) into focused column \(focusedIdx)")
-          return
-        }
-      }
-    }
-    // Fall through to other columns (skip focusedIdx since already checked)
-    for idx in workspace.columns.indices where idx != focusedIdx {
+    let candidates =
+      (workspace.columns.indices.contains(focusedIdx) ? [focusedIdx] : [])
+      + workspace.columns.indices.filter { $0 != focusedIdx }
+    for idx in candidates {
       let col = workspace.columns[idx]
       guard let firstWin = col.windows.first(where: { $0.pid == pid }) else { continue }
       let existingFrame: NSRect?
@@ -2137,59 +2113,46 @@ public class WindowManager {
 
   /// Record that a window resisted being narrower than observedWidth, and retile to accommodate.
   private func absorbMinWidth(wid: CGWindowID, observedWidth: CGFloat) {
-    for (screenID, var screenState) in state.screens {
-      let wsID = screenState.activeWorkspaceID
-      guard var workspace = screenState.workspaces[wsID] else { continue }
-      for colIdx in workspace.columns.indices {
-        if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
-          // Skip absorption when the observed width is at or beyond the usable screen
-          // width. A genuine minimum width can never reach the usable width — that
-          // would mean the window fills the entire tiling area, which only happens
-          // during a fullscreen transition. Without this guard, a fullscreen window's
-          // width gets absorbed as measuredMinWidth, permanently locking the column.
-          let usableWidth = LayoutGeometry.usableWidth(screenState.info, gaps)
-          guard observedWidth < usableWidth else {
-            tiler_debug(
-              "absorbMinWidth: skipping \(observedWidth) >= usable \(usableWidth) for wid=\(wid) (likely fullscreen transition)"
-            )
-            return
-          }
-          workspace.columns[colIdx].measuredMinWidth = max(
-            workspace.columns[colIdx].measuredMinWidth ?? 0, observedWidth)
-          screenState.workspaces[wsID] = workspace
-          state.screens[screenID] = screenState
-          setNeedsRetile()
-          tiler_debug(
-            "Absorbed min-width \(observedWidth) for wid=\(wid) in col \(colIdx) on screen \(screenID)"
-          )
-          return
-        }
-      }
-    }
+    absorbMinSize(
+      wid: wid, observed: observedWidth, into: \.measuredMinWidth, label: "min-width"
+    ) { LayoutGeometry.usableWidth($0, self.gaps) }
   }
 
+  /// Record that a window resisted being shorter than observedHeight, and retile to accommodate.
   private func absorbMinHeight(wid: CGWindowID, observedHeight: CGFloat) {
+    absorbMinSize(
+      wid: wid, observed: observedHeight, into: \.measuredMinHeight, label: "min-height"
+    ) { $0.visibleFrame.height - 2 * self.gaps.outerGaps }
+  }
+
+  private func absorbMinSize(
+    wid: CGWindowID, observed: CGFloat, into keyPath: WritableKeyPath<Column, CGFloat?>,
+    label: String, usable: (ScreenInfo) -> CGFloat
+  ) {
     for (screenID, var screenState) in state.screens {
       let wsID = screenState.activeWorkspaceID
       guard var workspace = screenState.workspaces[wsID] else { continue }
       for colIdx in workspace.columns.indices {
         if workspace.columns[colIdx].windows.contains(where: { $0.id == wid }) {
-          // Skip absorption when the observed height is at or beyond the usable
-          // screen height — same rationale as absorbMinWidth above.
-          let usableHeight = screenState.info.visibleFrame.height - 2 * gaps.outerGaps
-          guard observedHeight < usableHeight else {
+          // Skip absorption when the observed size is at or beyond the usable screen
+          // size. A genuine minimum size can never reach it — that would mean the
+          // window fills the entire tiling area, which only happens during a
+          // fullscreen transition. Without this guard, a fullscreen window's size
+          // gets absorbed as the column's minimum, permanently locking the column.
+          let usableSize = usable(screenState.info)
+          guard observed < usableSize else {
             tiler_debug(
-              "absorbMinHeight: skipping \(observedHeight) >= usable \(usableHeight) for wid=\(wid) (likely fullscreen transition)"
+              "absorb \(label): skipping \(observed) >= usable \(usableSize) for wid=\(wid) (likely fullscreen transition)"
             )
             return
           }
-          workspace.columns[colIdx].measuredMinHeight = max(
-            workspace.columns[colIdx].measuredMinHeight ?? 0, observedHeight)
+          workspace.columns[colIdx][keyPath: keyPath] = max(
+            workspace.columns[colIdx][keyPath: keyPath] ?? 0, observed)
           screenState.workspaces[wsID] = workspace
           state.screens[screenID] = screenState
           setNeedsRetile()
           tiler_debug(
-            "Absorbed min-height \(observedHeight) for wid=\(wid) in col \(colIdx) on screen \(screenID)"
+            "Absorbed \(label) \(observed) for wid=\(wid) in col \(colIdx) on screen \(screenID)"
           )
           return
         }
