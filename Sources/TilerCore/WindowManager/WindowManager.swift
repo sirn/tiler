@@ -273,10 +273,15 @@ public class WindowManager {
     guard let persisted = statePersistence.load() else { return }
 
     var windowPool: [CGWindowID: WindowNode] = [:]
+    // Discovery sized each column from its window, so an unplaced window keeps that width.
+    var discoveredWidths: [CGWindowID: ColumnWidth] = [:]
     for screenState in state.screens.values {
       for workspace in screenState.workspaces.values {
         for column in workspace.columns {
-          for window in column.windows { windowPool[window.id] = window }
+          for window in column.windows {
+            windowPool[window.id] = window
+            discoveredWidths[window.id] = column.width
+          }
         }
       }
     }
@@ -373,7 +378,7 @@ public class WindowManager {
           Column(
             windows: [window],
             focusedWindowIndex: 0,
-            width: layoutConfig.defaultColumnWidth
+            width: discoveredWidths[window.id] ?? layoutConfig.defaultColumnWidth
           ))
       }
       if ws1.focusedColumnIndex >= ws1.columns.count {
@@ -454,8 +459,7 @@ public class WindowManager {
                 if target.columns.isEmpty {
                   target.columns = [
                     Column(
-                      windows: [window], focusedWindowIndex: 0,
-                      width: layoutConfig.defaultColumnWidth)
+                      windows: [window], focusedWindowIndex: 0, width: col.width)
                   ]
                   target.focusedColumnIndex = 0
                 } else {
