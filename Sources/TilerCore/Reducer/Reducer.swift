@@ -12,28 +12,32 @@ enum Reducer {
     return col.windows[col.focusedWindowIndex]
   }
   private static func adjustColumnWidth(
-    _ col: inout Column, by delta: CGFloat, min minWidth: CGFloat = columnWidthMin,
-    max maxWidth: CGFloat = columnWidthMax
+    _ col: inout Column, by delta: CGFloat, screen: ScreenInfo, gaps: GapConfig,
+    min minWidth: CGFloat = columnWidthMin, max maxWidth: CGFloat = columnWidthMax
   ) {
+    let proportion: CGFloat
     switch col.width {
-    case .proportion(let proportion):
-      // Snap to the next step rather than add the delta, so a width adopted from
-      // a window lands on the step grid. The tolerance keeps a proportion already
-      // on the grid from skipping a step because of float error.
-      let step = abs(delta)
-      let steps = proportion / step
-      let snapped =
-        delta > 0
-        ? ((steps + 1e-6).rounded(.down) + 1) * step
-        : ((steps - 1e-6).rounded(.up) - 1) * step
-      // A proportion from the config or a window can lie outside the resize limits;
-      // the clamp must not move it against the direction of the resize.
-      let clamped = min(max(snapped, minWidth), maxWidth)
-      col.width = .proportion(delta > 0 ? max(clamped, proportion) : min(clamped, proportion))
+    case .proportion(let p):
+      proportion = p
     case .fixed(let points):
-      // A fixed width has no proportion to step, so scale it by the same fraction.
-      col.width = .fixed(max(1, (points * (1 + delta)).rounded()))
+      // A fixed width has no step of its own, so resizing turns it into the
+      // proportion it currently fills, like Niri, and steps that.
+      guard let p = LayoutGeometry.proportion(forWidth: points, screen, gaps) else { return }
+      proportion = p
     }
+    // Snap to the next step rather than add the delta, so a width adopted from
+    // a window lands on the step grid. The tolerance keeps a proportion already
+    // on the grid from skipping a step because of float error.
+    let step = abs(delta)
+    let steps = proportion / step
+    let snapped =
+      delta > 0
+      ? ((steps + 1e-6).rounded(.down) + 1) * step
+      : ((steps - 1e-6).rounded(.up) - 1) * step
+    // A proportion from the config or a window can lie outside the resize limits;
+    // the clamp must not move it against the direction of the resize.
+    let clamped = min(max(snapped, minWidth), maxWidth)
+    col.width = .proportion(delta > 0 ? max(clamped, proportion) : min(clamped, proportion))
     col.measuredMinWidth = nil
   }
 
@@ -280,14 +284,16 @@ enum Reducer {
       return moveFocusedWindowToAdjacentScreen(offset: 1, to: &state, env: env)
 
     case .increaseColumnWidth:
+      guard let screen = env.activeScreenID.flatMap({ state.screens[$0]?.info }) else { return [] }
       return state.withFocusedColumn(env: env) { _, _, col in
-        adjustColumnWidth(&col, by: columnWidthIncrement)
+        adjustColumnWidth(&col, by: columnWidthIncrement, screen: screen, gaps: env.gaps)
         return [.retile]
       }
 
     case .decreaseColumnWidth:
+      guard let screen = env.activeScreenID.flatMap({ state.screens[$0]?.info }) else { return [] }
       return state.withFocusedColumn(env: env) { _, _, col in
-        adjustColumnWidth(&col, by: -columnWidthIncrement)
+        adjustColumnWidth(&col, by: -columnWidthIncrement, screen: screen, gaps: env.gaps)
         return [.retile]
       }
 

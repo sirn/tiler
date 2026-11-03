@@ -253,6 +253,18 @@ final class ReducerTests: XCTestCase {
     assertProportion(focusedWidth(state), 0.2)
   }
 
+  // A fixed 400pt column on a 1000pt screen with the default gaps fills about 0.41.
+  func testResizeFixedColumnWidthStepsAsProportion() {
+    let ws = Workspace(id: 1, columns: [Column(width: .fixed(400))], focusedColumnIndex: 0)
+    let screen = ScreenState(info: makeScreen(), workspaces: [1: ws], activeWorkspaceID: 1)
+    var grown = TilerState(screens: [1: screen])
+    var shrunk = grown
+    _ = Reducer.apply(.increaseColumnWidth, to: &grown, env: env())
+    _ = Reducer.apply(.decreaseColumnWidth, to: &shrunk, env: env())
+    assertProportion(focusedWidth(grown), 0.45)
+    assertProportion(focusedWidth(shrunk), 0.40)
+  }
+
   // MARK: - Consume / expel
 
   func testConsumeOrExpelLeftExpelsMultiWindowColumn() {

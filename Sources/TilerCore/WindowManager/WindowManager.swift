@@ -1666,7 +1666,8 @@ public class WindowManager {
       workspaceCount: workspaceCount,
       activeScreenID: activeScreenID(),
       orderedScreenIDs: orderedScreenIDs(),
-      focusColumnWrap: focusColumnWrap
+      focusColumnWrap: focusColumnWrap,
+      gaps: gaps
     )
   }
   private func runEffects(_ effects: [Effect]) {

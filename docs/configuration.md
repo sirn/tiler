@@ -57,7 +57,7 @@ When `true`, `focus_column_left` / `focus_column_right` wrap within the active s
 - Type: number (a proportion, `0.0`–`1.0`) or string (`"900px"`)
 - Default: `0.5`
 
-Width applied to newly created columns when the window's own width is not known. A newly opened window keeps its current width until you resize the column. A proportion is a share of the slot width, which is the usable width plus one gap, and each column keeps one gap for itself. Proportions that add up to `1.0` therefore fill the screen exactly. A `"<points>px"` string gives a fixed width that no viewport size changes.
+Width applied to newly created columns when the window's own width is not known. A newly opened window keeps its current width until you resize the column. A proportion is a share of the slot width, which is the usable width plus one gap, and each column keeps one gap for itself. Proportions that add up to `1.0` therefore fill the screen exactly. A `"<points>px"` string gives a fixed width that no viewport size changes. Resizing a fixed-width column turns it into a proportion.
 
 ### `center_focused_column`
 
